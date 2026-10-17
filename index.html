@@ -1,4 +1,5 @@
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>市場情報雷達 Market Signal</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -266,6 +267,74 @@ details.kw summary{cursor:pointer;font-weight:500;padding:2px 0}
 .cls-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13.5px;padding:8px 10px;border-radius:8px;background:var(--surface-2)}
 .cls-row .res{font-weight:700;margin-right:6px}
 .cls-row.cand .res{color:var(--ink-2);font-weight:500}
+/* 手機版：放大字級、精簡頂列、表格改為卡片 */
+@media (max-width:600px){
+  body{font-size:16px}
+  .topbar .wrap{gap:6px 12px;padding-block:8px}
+  .brand-name{font-size:16px}
+  .tabs{order:3;width:100%}
+  .tab{flex:1;padding:8px 4px;font-size:15px}
+  .basedate{font-size:13px}
+  main{padding-block:18px 48px}
+  .view-head h1{font-size:23px}
+  .view-head p{font-size:15.5px}
+  .eyebrow{font-size:12.5px}
+  .changes,.panel,.card,.group,.block,.d-summary{padding:14px}
+  .changes-head h2,.panel h2,.group-head h2{font-size:17px}
+  .changes-head span,.panel .sub{font-size:14px}
+  .change-list{grid-template-columns:1fr}
+  .change-list li{font-size:15px}
+  .filters{gap:10px}
+  .chips{flex-wrap:nowrap;overflow-x:auto;width:100%;padding-bottom:4px;scrollbar-width:none}
+  .chip{flex:none;white-space:nowrap;font-size:14.5px;padding:7px 14px}
+  .sort{margin-left:0;width:100%;font-size:15px}
+  .sort select{flex:1;padding:8px}
+  .card h3{font-size:18px}
+  .cats{font-size:13.5px}
+  .pill{font-size:13.5px}
+  .m-label{font-size:13px}
+  .m-val{font-size:24px}
+  .note{font-size:13.5px}
+  .card-foot{font-size:14px}
+  .tag{font-size:12px}
+  .legend{font-size:13.5px}
+  .tip{font-size:13.5px}
+  .watch li{font-size:15px}
+  .watch .w-meta{font-size:13px}
+  .watch .w-why{font-size:14.5px}
+  .d-head h1{font-size:24px}
+  .d-path{font-size:14px}
+  .ind-name{font-size:15.5px}
+  .ind-why{font-size:15px}
+  .ind-rule{font-size:13px}
+  .group-score .num{font-size:30px}
+  .section-title h2{font-size:19px}
+  .section-title span{font-size:14px}
+  .tl-date{font-size:14px}
+  .kind,.dir,.flag{font-size:13px}
+  .tl-note{font-size:15px}
+  .docs li{font-size:14px}
+  .statusmark,.warnbox{font-size:14px}
+  .dots span{font-size:12.5px}
+  .steps li{font-size:15px}
+  .steps span{font-size:14px}
+  .formula{font-size:14.5px}
+  .kv th,.kv td{font-size:14.5px}
+  .kwi{font-size:14px}
+  .cls-row{font-size:15px}
+  .search{width:100%;padding:9px 12px;font-size:16px}
+  .dt-wrap{background:none;border:0;overflow:visible}
+  .dt{min-width:0}
+  .dt thead{display:none}
+  .dt,.dt tbody,.dt tr{display:block;width:100%}
+  .dt tr{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;margin-bottom:10px}
+  .dt td{display:grid;grid-template-columns:5em minmax(0,1fr);gap:10px;border:0;padding:4px 0;font-size:15px}
+  .dt td::before{content:attr(data-label);color:var(--muted);font-size:13px;padding-top:2px}
+  .dt td.num{white-space:normal}
+  .dt .t{min-width:0;font-weight:500}
+  .dt td.emptycell{display:block}
+  .dt td.emptycell::before{content:none}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -599,7 +668,9 @@ function changes(){
 }
 
 function matrix(list){
-  const W=560,H=340,L=46,R=18,T=14,B=46;
+  const narrow=window.innerWidth<600;
+  const W=narrow?360:560,H=narrow?300:340,L=narrow?40:46,R=narrow?10:18,T=14,B=46;
+  const k=narrow?1.15:1;
   const xd=[2.5,5.25], yd=[3,5];
   const x=v=>L+(v-xd[0])/(xd[1]-xd[0])*(W-L-R);
   const y=v=>T+(1-(v-yd[0])/(yd[1]-yd[0]))*(H-T-B);
@@ -607,25 +678,26 @@ function matrix(list){
   let g='';
   for(const t of [3,3.5,4,4.5,5]){
     g+=`<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H-B}" stroke="var(--line)" stroke-width="1"/>`;
-    g+=`<text x="${x(t)}" y="${H-B+16}" text-anchor="middle" font-size="11" fill="var(--muted)" class="num">${t.toFixed(1)}</text>`;
+    g+=`<text x="${x(t)}" y="${H-B+16}" text-anchor="middle" font-size="${11*k}" fill="var(--muted)" class="num">${t.toFixed(1)}</text>`;
     g+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
-    g+=`<text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${t.toFixed(1)}</text>`;
+    g+=`<text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="${11*k}" fill="var(--muted)">${t.toFixed(1)}</text>`;
   }
   g+=`<line x1="${x(3.75)}" x2="${x(3.75)}" y1="${T}" y2="${H-B}" stroke="var(--line-2)" stroke-dasharray="4 4" stroke-width="1.5"/>`;
   g+=`<line x1="${L}" x2="${W-R}" y1="${y(3.75)}" y2="${y(3.75)}" stroke="var(--line-2)" stroke-dasharray="4 4" stroke-width="1.5"/>`;
-  const ql=(tx,ty,anchor,txt)=>`<text x="${tx}" y="${ty}" text-anchor="${anchor}" font-size="12" font-weight="500" fill="var(--muted)">${txt}</text>`;
+  const ql=(tx,ty,anchor,txt)=>`<text x="${tx}" y="${ty}" text-anchor="${anchor}" font-size="${12*k}" font-weight="500" fill="var(--muted)">${txt}</text>`;
   g+=ql(W-R-6,T+16,'end','優先關注')+ql(L+6,T+16,'start','持續追蹤')+ql(W-R-6,H-B-8,'end','定期檢視')+ql(L+6,H-B-8,'start','補充調查');
-  g+=`<text x="${(L+W-R)/2}" y="${H-8}" text-anchor="middle" font-size="12" fill="var(--ink-2)">可信度 Credibility →</text>`;
-  g+=`<text transform="translate(12 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="12" fill="var(--ink-2)">重大性 Significance →</text>`;
+  g+=`<text x="${(L+W-R)/2}" y="${H-8}" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">可信度 Credibility →</text>`;
+  g+=`<text transform="translate(12 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">重大性 Significance →</text>`;
   for(const s of SIGNALS){
     const cx=x(s.cred.score), cy=y(s.sig.score), on=ids.has(s.id);
     const prov=s.cred.kind!=='formal'||s.sig.kind!=='formal';
     const col=STATUS[s.status].color;
-    const left=s.cred.score>=4.75;
+    // 標籤放右側；若右側太近有其他資料點（或已在右緣）則改放左側
+    const left=s.cred.score>=4.75||SIGNALS.some(o=>o!==s&&o.cred.score>s.cred.score&&o.cred.score-s.cred.score<(narrow?0.75:0.45)&&Math.abs(o.sig.score-s.sig.score)<0.2);
     g+=`<g class="pt" data-id="${s.id}" tabindex="0" role="button" aria-label="${esc(s.short)}：可信度 ${f2(s.cred.score)}，重大性 ${f2(s.sig.score)}，${STATUS[s.status].label}" style="cursor:pointer;opacity:${on?1:.22}">
       <circle cx="${cx}" cy="${cy}" r="16" fill="transparent"/>
       <circle cx="${cx}" cy="${cy}" r="7" fill="${prov?'var(--surface)':col}" stroke="${prov?col:'var(--surface)'}" stroke-width="${prov?2.5:2}"/>
-      <text x="${left?cx-12:cx+12}" y="${cy+4}" text-anchor="${left?'end':'start'}" font-size="12.5" font-weight="500" fill="var(--ink)">${esc(s.short)}</text>
+      <text x="${left?cx-12:cx+12}" y="${cy+4}" text-anchor="${left?'end':'start'}" font-size="${12.5*k}" font-weight="500" fill="var(--ink)">${esc(s.short)}</text>
     </g>`;
   }
   return `<div class="chart-wrap" id="mx"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="市場訊號優先順序矩陣">${g}</svg><div class="tip" hidden></div></div>
@@ -777,16 +849,17 @@ function renderData(){
   <p>每筆資料保留名稱、發布單位、發布日期、收錄日期與來源，並列出去重與事件關聯結果。時間判斷一律以發布日期為準。</p></div>
   <div class="toolbar"><input class="search" id="q" type="search" placeholder="搜尋資料名稱、來源或編號" value="${esc(state.q)}" aria-label="搜尋原始資料">
     <span class="note">共 ${DOCS.length} 筆資料，去重後 ${Object.keys(EVENTS).length} 項事件。提案參考資料未附原文網址，來源連結指向發布單位網站。</span></div>
-  <div class="table-scroll"><table class="dt">
+  <div class="table-scroll dt-wrap"><table class="dt">
     <thead><tr><th>#</th><th>發布日期</th><th>收錄日期</th><th>來源</th><th>類型</th><th>資料名稱</th><th>去重結果</th><th>關聯訊號</th><th>品質</th></tr></thead>
     <tbody>${rows.map(d=>{const E=EVENTS[d.ev];const late=d.date&&days(d.date,d.ingest)>14;
       const dd=d.dupOf?`重複 → 併入 #${d.dupOf}`:E.docs.length>1?`獨立事件（含 ${E.docs.length} 筆）`:'獨立事件';
-      return `<tr><td class="num">${d.no}</td><td class="num">${d.date?fmt(d.date):`<span class="warncell">待確認</span><br><span class="muted">標示 ${fmt(d.labeled)}</span>`}</td>
-      <td class="num">${fmt(d.ingest)}${late?'<br><span class="muted">補收錄</span>':''}</td>
-      <td><a href="${SRC[d.src].url}" target="_blank" rel="noopener">${SRC[d.src].name}</a></td><td>${KIND[d.kind]}</td>
-      <td class="t">${esc(d.title)}</td><td>${dd}</td><td>${linkedSignals(d.ev)}</td>
-      <td>${d.warn?`<span class="warncell">⚠ ${d.warn.length} 項異常</span>`:'<span class="muted">—</span>'}</td></tr>`}).join('')}
-    ${rows.length?'':'<tr><td colspan="9" class="muted">沒有符合的資料，請換個關鍵字。</td></tr>'}</tbody>
+      const td=(label,html,cls='')=>`<td class="${cls}" data-label="${label}"><div>${html}</div></td>`;
+      return `<tr>${td('編號',d.no,'num')}${td('發布日期',d.date?fmt(d.date):`<span class="warncell">待確認</span><br><span class="muted">標示 ${fmt(d.labeled)}</span>`,'num')}
+      ${td('收錄日期',fmt(d.ingest)+(late?'<br><span class="muted">補收錄</span>':''),'num')}
+      ${td('來源',`<a href="${SRC[d.src].url}" target="_blank" rel="noopener">${SRC[d.src].name}</a>`)}${td('類型',KIND[d.kind])}
+      ${td('資料名稱',esc(d.title),'t')}${td('去重結果',dd)}${td('關聯訊號',linkedSignals(d.ev))}
+      ${td('品質',d.warn?`<span class="warncell">⚠ ${d.warn.length} 項異常</span>`:'<span class="muted">—</span>')}</tr>`}).join('')}
+    ${rows.length?'':'<tr><td colspan="9" class="muted emptycell">沒有符合的資料，請換個關鍵字。</td></tr>'}</tbody>
   </table></div>`;
   const qi=document.getElementById('q');
   qi.oninput=e=>{state.q=e.target.value;const pos=e.target.selectionStart;renderData();const n=document.getElementById('q');n.focus();n.setSelectionRange(pos,pos)};
@@ -878,5 +951,8 @@ document.addEventListener('click',e=>{
   const o=e.target.closest('[data-open]'); if(o){go('detail',o.dataset.open);return}
   const v=e.target.closest('[data-view],[data-view-go]'); if(v){go(v.dataset.view||v.dataset.viewGo)}
 });
+// 跨過手機／桌面寬度時重繪，讓矩陣圖改用對應尺寸
+let lastNarrow=window.innerWidth<600;
+window.addEventListener('resize',()=>{const n=window.innerWidth<600;if(n!==lastNarrow){lastNarrow=n;if(state.view==='dash')render()}});
 render();
 </script>
