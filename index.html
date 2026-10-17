@@ -1,0 +1,882 @@
+<meta charset="utf-8">
+<title>市場情報雷達 Market Signal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap">
+<style>
+/* Layout: sticky top bar with three views; dashboard = signal cards (main) + priority matrix & watch list (aside); detail = indicators + event timeline */
+:root{
+  --bg:#F1F4F6; --surface:#FFFFFF; --surface-2:#F6F8FA; --ink:#13212B; --ink-2:#44535F; --muted:#6C7A86;
+  --line:#DCE2E7; --line-2:#C5CED6;
+  --accent:#0C6774; --accent-ink:#FFFFFF; --accent-soft:#DFEEF0;
+  --st-new:#2A63C4; --st-dev:#6C42BD; --st-per:#1B7A4B; --st-weak:#B0570F;
+  --warn:#B0261D; --warn-soft:#FBEAE7;
+  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-display:"Noto Serif TC","PMingLiU","Songti TC",serif;
+  --f-num:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D141A; --surface:#141E26; --surface-2:#1A2630; --ink:#E4EBF0; --ink-2:#A9B6C0; --muted:#7E8C97;
+  --line:#25333E; --line-2:#344451;
+  --accent:#4DB3C1; --accent-ink:#06191C; --accent-soft:#12323A;
+  --st-new:#6E9FF2; --st-dev:#A98CEB; --st-per:#4CC287; --st-weak:#E89B52;
+  --warn:#F0857B; --warn-soft:#3A1C1A; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0D141A; --surface:#141E26; --surface-2:#1A2630; --ink:#E4EBF0; --ink-2:#A9B6C0; --muted:#7E8C97;
+  --line:#25333E; --line-2:#344451;
+  --accent:#4DB3C1; --accent-ink:#06191C; --accent-soft:#12323A;
+  --st-new:#6E9FF2; --st-dev:#A98CEB; --st-per:#4CC287; --st-weak:#E89B52;
+  --warn:#F0857B; --warn-soft:#3A1C1A; color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65}
+table{font-size:inherit;border-collapse:collapse}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+h1,h2,h3,h4{text-wrap:balance;margin:0;line-height:1.35}
+p{margin:0}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.gutter{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1240px;margin:0 auto}
+
+/* top bar */
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding-block:10px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{flex:none}
+.brand-name{font-weight:700;font-size:17px;letter-spacing:.02em}
+.brand-sub{font-family:var(--f-num);font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:0;background:none;padding:7px 12px;border-radius:8px;cursor:pointer;color:var(--ink-2);font-weight:500}
+.tab:hover{background:var(--surface-2);color:var(--ink)}
+.tab[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+.basedate{margin-left:auto;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:baseline}
+.basedate b{color:var(--ink);font-weight:500}
+
+main{padding-block:24px 64px}
+.view-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 24px;margin-bottom:20px}
+.view-head h1{font-family:var(--f-display);font-size:26px;font-weight:700}
+.view-head p{color:var(--ink-2);max-width:62ch}
+.eyebrow{font-size:12px;letter-spacing:.1em;color:var(--muted);font-weight:500}
+
+/* change summary */
+.changes{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:20px}
+.changes-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-bottom:10px}
+.changes-head h2{font-size:15px}
+.changes-head span{font-size:13px;color:var(--muted)}
+.change-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 20px}
+.change-list li{display:flex;gap:10px;align-items:flex-start;font-size:14px;min-width:0}
+.change-ico{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px;margin-top:1px;background:var(--surface-2);color:var(--ink-2)}
+.change-ico.c-new{background:color-mix(in srgb,var(--st-new) 16%,transparent);color:var(--st-new)}
+.change-ico.c-status{background:color-mix(in srgb,var(--st-dev) 16%,transparent);color:var(--st-dev)}
+.change-ico.c-warn{background:var(--warn-soft);color:var(--warn)}
+.linkish{border:0;background:none;padding:0;color:var(--accent);cursor:pointer;text-align:left;font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent) 40%,transparent);text-underline-offset:3px}
+
+/* filters */
+.filters{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;margin-bottom:16px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line-2);background:var(--surface);border-radius:999px;padding:5px 12px;font-size:13.5px;cursor:pointer;display:inline-flex;gap:6px;align-items:baseline}
+.chip .n{font-family:var(--f-num);font-size:12px;color:var(--muted)}
+.chip:hover{border-color:var(--accent)}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed="true"] .n{color:inherit;opacity:.8}
+.sort{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink-2);margin-left:auto}
+.sort select{border:1px solid var(--line-2);background:var(--surface);border-radius:8px;padding:5px 8px}
+
+.dash{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start}
+@media (max-width:1000px){.dash{grid-template-columns:minmax(0,1fr)}}
+.cards{display:grid;gap:12px}
+
+/* signal card */
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;display:grid;gap:12px;transition:border-color .15s, box-shadow .15s}
+.card:hover{border-color:var(--line-2);box-shadow:0 2px 10px color-mix(in srgb,var(--ink) 8%,transparent)}
+.card:focus-within{border-color:var(--accent)}
+.card-top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.cats{font-size:12.5px;color:var(--muted)}
+.card h3{font-size:17px;font-weight:700}
+.card-link{all:unset;cursor:pointer}
+.card-link::after{content:"";position:absolute;inset:0;border-radius:var(--r)}
+.card-link:focus-visible{outline:none}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:520px){.metrics{grid-template-columns:1fr 1fr}.metrics .m:last-child{grid-column:1/-1}}
+.m{background:var(--surface-2);border-radius:8px;padding:8px 10px;min-width:0}
+.m-label{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.m-val{font-family:var(--f-num);font-size:22px;font-weight:600;line-height:1.3}
+.m-val.na{font-family:var(--f-body);font-size:14px;color:var(--muted);font-weight:500;line-height:2}
+.card-foot{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--ink-2)}
+.card-foot .warnflag{color:var(--warn);font-weight:500}
+.action{font-weight:500}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12.5px;font-weight:500;border:1px solid currentColor;line-height:1.6;white-space:nowrap}
+.pill .g{font-size:10px}
+.st-new{color:var(--st-new);background:color-mix(in srgb,var(--st-new) 10%,transparent)}
+.st-dev{color:var(--st-dev);background:color-mix(in srgb,var(--st-dev) 10%,transparent)}
+.st-per{color:var(--st-per);background:color-mix(in srgb,var(--st-per) 10%,transparent)}
+.st-weak{color:var(--st-weak);background:color-mix(in srgb,var(--st-weak) 10%,transparent)}
+.tag{font-size:11px;padding:0 6px;border-radius:4px;font-weight:500;letter-spacing:.04em;white-space:nowrap;line-height:1.7}
+.tag.formal{background:var(--accent-soft);color:var(--accent)}
+.tag.prov{border:1px dashed var(--line-2);color:var(--ink-2)}
+.tag.none{color:var(--muted)}
+
+.bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+/* aside panels */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+.panel+.panel{margin-top:16px}
+.panel h2{font-size:15px;margin-bottom:4px}
+.panel .sub{font-size:13px;color:var(--muted);margin-bottom:10px}
+.chart-wrap{position:relative}
+.chart-wrap svg{display:block;width:100%;height:auto}
+.chart-wrap text{font-family:var(--f-body)}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12.5px;padding:7px 10px;border-radius:8px;line-height:1.5;max-width:220px;transform:translate(-50%,calc(-100% - 12px));white-space:normal;z-index:2}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--ink-2);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.legend i.hollow{background:var(--surface)!important;border:2px solid var(--ink-2)}
+.watch{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.watch li{border-top:1px solid var(--line);padding-top:10px;font-size:13.5px}
+.watch li:first-child{border-top:0;padding-top:0}
+.watch .w-title{font-weight:500}
+.watch .w-meta{font-size:12px;color:var(--muted)}
+.watch .w-why{color:var(--ink-2);font-size:13px}
+.empty{padding:28px 18px;text-align:center;color:var(--ink-2);background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--r)}
+
+/* detail */
+.back{border:0;background:none;color:var(--accent);cursor:pointer;padding:0;font-weight:500;margin-bottom:14px}
+.d-head{display:grid;gap:10px;margin-bottom:20px}
+.d-head h1{font-family:var(--f-display);font-size:clamp(22px,3vw,30px);font-weight:700;max-width:36ch}
+.d-path{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.d-summary{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;max-width:none}
+.d-summary p{max-width:72ch;color:var(--ink)}
+.d-summary .eyebrow{margin-bottom:6px}
+.detail{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start;margin-top:20px}
+@media (max-width:1000px){.detail{grid-template-columns:minmax(0,1fr)}}
+.groups{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.groups{grid-template-columns:1fr}}
+.group{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;display:grid;gap:14px;align-content:start}
+.group-head{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.group-head h2{font-size:15px}
+.group-head .en{font-size:12px;color:var(--muted);font-family:var(--f-num)}
+.group-score{text-align:right}
+.group-score .num{font-size:28px;font-weight:600;line-height:1.1}
+.ind{display:grid;gap:6px}
+.ind-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.ind-name{font-weight:500;font-size:14px}
+.ind-name small{color:var(--muted);font-family:var(--f-num);font-size:11px;margin-left:4px}
+.ind-score{font-family:var(--f-num);font-weight:600}
+.ind-score.na{font-family:var(--f-body);font-weight:500;color:var(--muted);font-size:13px}
+.segs{display:grid;grid-template-columns:repeat(5,1fr);gap:3px}
+.segs i{height:6px;border-radius:2px;background:var(--line)}
+.segs i.on{background:var(--accent)}
+.segs.na i{background:repeating-linear-gradient(135deg,var(--line) 0 3px,transparent 3px 6px)}
+.ind-why{font-size:13.5px;color:var(--ink-2)}
+.ind-rule{font-size:11.5px;color:var(--muted)}
+
+.section-title{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:28px 0 12px}
+.section-title h2{font-size:18px}
+.section-title span{font-size:13px;color:var(--muted)}
+
+/* timeline */
+.timeline{list-style:none;margin:0;padding:0;position:relative}
+.timeline::before{content:"";position:absolute;left:96px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tl{display:grid;grid-template-columns:84px minmax(0,1fr);gap:24px;position:relative;padding-bottom:18px}
+.tl::before{content:"";position:absolute;left:91px;top:7px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--muted)}
+.tl.d-support::before{border-color:var(--st-per);background:var(--st-per)}
+.tl.d-counter::before{border-color:var(--st-weak);background:var(--st-weak)}
+.tl.d-context::before{border-color:var(--muted)}
+.tl.d-hold::before{border-color:var(--warn);border-style:dashed}
+.tl-date{font-family:var(--f-num);font-size:13px;text-align:right;color:var(--ink-2);padding-top:1px}
+.tl-date.unk{font-family:var(--f-body);color:var(--warn)}
+.tl-body{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:grid;gap:8px;min-width:0}
+.tl-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.kind{font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:4px;padding:0 6px;border:1px solid var(--line)}
+.dir{font-size:12px;font-weight:500;padding:0 6px;border-radius:4px}
+.dir.support{color:var(--st-per);background:color-mix(in srgb,var(--st-per) 12%,transparent)}
+.dir.counter{color:var(--st-weak);background:color-mix(in srgb,var(--st-weak) 12%,transparent)}
+.dir.context{color:var(--ink-2);background:var(--surface-2)}
+.dir.hold{color:var(--warn);background:var(--warn-soft)}
+.tl-sum{font-weight:500}
+.tl-note{font-size:13.5px;color:var(--ink-2)}
+.docs{list-style:none;margin:0;padding:0;display:grid;gap:6px;border-top:1px dashed var(--line);padding-top:8px}
+.docs li{font-size:13px;color:var(--ink-2);display:grid;gap:2px}
+.docs .src{font-weight:500;color:var(--ink)}
+.docs .no{font-family:var(--f-num);color:var(--muted)}
+.flag{font-size:12px;color:var(--muted)}
+.flag.dup::before{content:"⧉ "}
+.flag.late::before{content:"↺ "}
+.statusmark{display:flex;gap:8px;align-items:flex-start;font-size:13px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+.warnbox{background:var(--warn-soft);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;display:grid;gap:4px}
+.warnbox b{color:var(--warn)}
+.warnbox ul{margin:0;padding-left:18px}
+@media (max-width:560px){
+  .timeline::before{left:7px}
+  .tl{grid-template-columns:minmax(0,1fr);gap:6px;padding-left:26px}
+  .tl::before{left:2px}
+  .tl-date{text-align:left}
+}
+.aside-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;font-size:13.5px}
+.dots{display:flex;gap:6px;margin:6px 0}
+.dots span{flex:1;font-size:11px;text-align:center;padding:4px 0;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+.dots span.na{background:transparent;border:1px dashed var(--line-2);color:var(--muted)}
+.note{font-size:12.5px;color:var(--muted)}
+
+/* data table */
+.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.search{border:1px solid var(--line-2);background:var(--surface);border-radius:8px;padding:7px 12px;min-width:0;width:min(360px,100%)}
+.table-scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.dt{width:100%;min-width:980px}
+.dt th,.dt td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);font-size:13.5px}
+.dt th{font-size:12px;color:var(--muted);font-weight:500;background:var(--surface-2);position:sticky;top:0;white-space:nowrap}
+.dt tr:last-child td{border-bottom:0}
+.dt td.num{white-space:nowrap}
+.dt .t{min-width:260px;color:var(--ink)}
+.dt .warncell{color:var(--warn);font-weight:500}
+.dt .muted{color:var(--muted)}
+
+/* method */
+.method{display:grid;gap:20px;max-width:980px}
+.block{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;display:grid;gap:12px}
+.block h2{font-size:17px}
+.block p{max-width:72ch;color:var(--ink-2)}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;counter-reset:s}
+.steps li{counter-increment:s;background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:13.5px;display:grid;gap:2px;min-width:0}
+.steps li::before{content:counter(s);font-family:var(--f-num);font-size:12px;color:var(--accent);font-weight:600}
+.steps b{font-weight:700}
+.steps span{color:var(--ink-2);font-size:12.5px}
+.formula{font-family:var(--f-num);background:var(--surface-2);border-radius:8px;padding:10px 14px;font-size:14px;overflow-x:auto}
+.kv{width:100%}
+.kv th,.kv td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+.kv th{color:var(--muted);font-weight:500;font-size:12px}
+.kv tr:last-child td{border-bottom:0}
+details.kw{border-top:1px solid var(--line);padding-top:8px}
+details.kw summary{cursor:pointer;font-weight:500;padding:2px 0}
+.kwrow{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.kwrow b{font-size:12px;color:var(--muted);font-weight:500;width:100%}
+.kwi{font-size:12.5px;padding:1px 7px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line)}
+.kwi.p{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.classify textarea{width:100%;min-height:76px;border:1px solid var(--line-2);border-radius:8px;padding:10px 12px;background:var(--surface);resize:vertical}
+.cls-out{display:grid;gap:8px}
+.cls-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13.5px;padding:8px 10px;border-radius:8px;background:var(--surface-2)}
+.cls-row .res{font-weight:700;margin-right:6px}
+.cls-row.cand .res{color:var(--ink-2);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="topbar">
+  <div class="wrap gutter">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="13" fill="none" stroke="var(--line-2)" stroke-width="1.5"/><circle cx="15" cy="15" r="8" fill="none" stroke="var(--line-2)" stroke-width="1.5"/><path d="M15 15 L15 2 A13 13 0 0 1 27.4 11 Z" fill="var(--accent)" opacity=".35"/><line x1="15" y1="15" x2="27.4" y2="11" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/><circle cx="21" cy="8.5" r="2" fill="var(--accent)"/><circle cx="15" cy="15" r="1.6" fill="var(--ink)"/></svg>
+      <div><div class="brand-name">市場情報雷達</div><div class="brand-sub">Market Signal</div></div>
+    </div>
+    <nav class="tabs" aria-label="主要頁面">
+      <button class="tab" data-view="dash">市場訊號</button>
+      <button class="tab" data-view="data">原始資料</button>
+      <button class="tab" data-view="method">評估方法</button>
+    </nav>
+    <div class="basedate">資料基準日 <b class="num" id="baseDate"></b></div>
+  </div>
+</header>
+<main class="gutter"><div class="wrap" id="app"></div></main>
+
+<script>
+/* ===================== 資料：依提案「實際使用資料與參考文獻」與第三輪動態更新測試結果 ===================== */
+const BASE = '2026-10-17';   // 資料基準日
+const PREV = '2026-10-03';   // 上次更新
+
+const CATS = [
+  {id:'inv', name:'投資型保險',
+   p:['投資型保單','投資型壽險','變額壽險','變額萬能壽險','投資型年金','變額年金'],
+   s:['投資標的','連結基金','帳戶價值','保單帳戶價值','專設帳簿','單位淨值','全權委託帳戶','委託投資帳戶','保險成本','附加費用','投資風險']},
+  {id:'sav', name:'儲蓄與傳統壽險',
+   p:['終身壽險','增額終身壽險','定期壽險','生死合險','養老保險','還本型'],
+   s:['終身保障','身故保險金','保單價值準備金','解約金','定期保障','保障型','高保額','滿期金','儲蓄險','祝壽金','繳費年期']},
+  {id:'ir', name:'利率變動型與外幣保單',
+   p:['利率變動型','利變型','宣告利率','美元保單','外幣保單','外幣保險商品'],
+   s:['預定利率','利差','保證利率','增額','解約金','美元計價','澳幣','人民幣','匯率風險','外幣收付','美元利變']},
+  {id:'ann', name:'年金保險',
+   p:['即期年金','遞延年金','年金保險','退休金','退休規劃商品','養老年金'],
+   s:['立即給付','年金給付','保證期間','累積期','給付期','年金化','年金轉換','領回','終身給付','長壽風險','高齡化']},
+  {id:'med', name:'醫療與健康險',
+   p:['實支實付','住院醫療','日額型','住院日額','手術險','重大疾病險','重大傷病險','癌症險','特定傷病','醫療險費率調整','保證續保','保費調漲'],
+   s:['門診手術','自費醫材','病房差額','雜費','健保','一次給付','確診','先進醫療','達文西手術','免疫療法','費率調整','理賠率']},
+  {id:'ltc', name:'失能與長照險',
+   p:['長期照顧保險','長照險','失能扶助險','失能險'],
+   s:['失能等級','失智','照護','一次金','月給付','長照 2.0','輔具','照顧費用','高齡']},
+  {id:'acc', name:'傷害與意外險',
+   p:['傷害保險','意外險','意外傷害','旅遊平安險','旅平險','旅遊不便險','微型保險'],
+   s:['意外身故','殘廢','傷害醫療','骨折','海外突發疾病','班機延誤','行李遺失','低保費','弱勢族群','小額保險']},
+  {id:'grp', name:'團體與其他',
+   p:['團體保險','團險','團體一年定期壽險','小額終老保險'],
+   s:['企業員工福利','團體醫療','團體傷害','喪葬費用','高齡','簡易投保']},
+];
+const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
+
+const SRC = {
+  fsc:{name:'金管會保險局', url:'https://www.ib.gov.tw/'},
+  cna:{name:'中央社', url:'https://www.cna.com.tw/'},
+  udn:{name:'聯合新聞網', url:'https://udn.com/'},
+  edn:{name:'經濟日報', url:'https://money.udn.com/'},
+  lia:{name:'壽險公會', url:'https://www.lia-roc.org.tw/'},
+  cpc:{name:'行政院消費者保護會', url:'https://cpc.ey.gov.tw/'},
+};
+const KIND = {stat:'市場統計', policy:'政策法規', company:'公司動態', news:'新聞報導'};
+
+// 原始資料（編號對應提案參考文獻）；ingest = 系統收錄日期
+const DOCS = [
+  {no:1, date:'2026-10-08', ingest:'2026-10-08', src:'fsc', kind:'policy', ev:'E_wm_policy', title:'金管會開放財富管理保險商品不適用「人壽保險商品死亡給付對保單價值準備金（保單帳戶價值）之最低比率規範」，助益保險業拓展財富管理業務'},
+  {no:2, date:'2026-10-06', ingest:'2026-10-06', src:'fsc', kind:'policy', ev:'E_vc', title:'預告修正「保險業資金辦理專案運用公共及社會福利事業投資管理辦法」，鼓勵保險業資金投入創投事業'},
+  {no:3, date:'2026-10-06', ingest:'2026-10-06', src:'fsc', kind:'policy', ev:'E_health', title:'金管會放寬保險業投資健康福祉事業 串聯健康促進、長照服務與全齡金融，打造健康福祉新生態'},
+  {no:4, date:'2026-09-29', ingest:'2026-09-29', src:'fsc', kind:'stat', ev:'E_fx_jul', title:'壽險業115年截至7月底外幣保險商品銷售情形'},
+  {no:5, date:'2026-01-27', ingest:'2026-01-28', src:'fsc', kind:'policy', ev:'E_orsa', title:'保險業辦理自我風險及清償能力評估機制指引'},
+  {no:6, date:null, labeled:'2026-01-27', ingest:'2026-10-12', src:'fsc', kind:'stat', ev:'E_q6', title:'保險業辦理自我風險及清償能力評估機制指引',
+   warn:['標題與內文不一致：標題為自我風險及清償能力評估機制指引，內文實際為外溢效果及實物給付型保險商品銷售統計','發布日期與事件內容矛盾：原始標示 2026/01/27，與內文統計期間無法對應','同一資料出現不同版本：與 #5 標題相同但內容不同']},
+  {no:7, date:'2026-10-06', ingest:'2026-10-06', src:'udn', kind:'news', ev:'E_health', dupOf:3, title:'金管會宣布 鬆綁保險公司投資五大類健康事業'},
+  {no:8, date:'2026-09-30', ingest:'2026-09-30', src:'udn', kind:'news', ev:'E_rate_dec', title:'Fed升息後壽險按兵不動 10月美元宣告利率天花板暫守4.42%'},
+  {no:9, date:'2026-10-04', ingest:'2026-10-04', src:'edn', kind:'company', ev:'E_pet', title:'產險推寵物險 毛孩保障升級'},
+  {no:10, date:'2026-10-06', ingest:'2026-10-06', src:'udn', kind:'news', ev:'E_aging', title:'高齡化 保險業與保單面臨轉型'},
+  {no:11, date:'2025-07-30', ingest:'2025-07-31', src:'lia', kind:'policy', ev:'E_presale', title:'保險商品銷售前程序作業準則'},
+  {no:12, date:'2026-10-04', ingest:'2026-10-05', src:'edn', kind:'company', ev:'E_pet', dupOf:9, dupKind:'重複收錄', title:'產險推寵物險 毛孩保障升級'},
+  {no:13, date:'2026-09-16', ingest:'2026-09-16', src:'cna', kind:'stat', ev:'E_inv_aug', title:'壽險業前8月新契約保費破兆元 投資型保單年增135%'},
+  {no:14, date:'2026-08-25', ingest:'2026-08-25', src:'cna', kind:'stat', ev:'E_fx_h1', title:'外幣保單上半年新契約保費2865億元 創5年同期新高'},
+  {no:15, date:'2026-04-16', ingest:'2026-04-16', src:'cna', kind:'stat', ev:'E_inv_q1', title:'壽險業首季新契約保費衝3682億 投資型年增逾5成'},
+  {no:16, date:'2026-10-10', ingest:'2026-10-10', src:'edn', kind:'news', ev:'E_spill_growth', title:'外溢保單市場與多家壽險公司銷售成長相關報導'},
+  {no:17, date:'2026-10-10', ingest:'2026-10-10', src:'edn', kind:'company', ev:'E_spill_reward', title:'外溢保單回饋機制朝點數、保障、健康服務與數位平台發展相關報導'},
+  {no:18, date:'2026-10-08', ingest:'2026-10-08', src:'udn', kind:'company', ev:'E_costco', title:'好市多與國泰產險合作會員專屬旅遊、車險等保險方案相關報導'},
+  {no:19, date:'2026-08-31', ingest:'2026-08-31', src:'edn', kind:'stat', ev:'E_ir_cool', title:'利變型壽險及年金前7月銷售降溫相關報導'},
+  {no:20, date:'2026-08-20', ingest:'2026-08-20', src:'edn', kind:'news', ev:'E_wm_khh', title:'高雄資產管理專區保險商品與高資產客群市場發展相關報導'},
+  {no:21, date:'2026-08-06', ingest:'2026-08-07', src:'cpc', kind:'stat', ev:'E_spill_stat', title:'外溢效果保險商品及實物給付型保險商品銷售情形相關資料'},
+  {no:22, date:'2026-07-14', ingest:'2026-10-12', src:'cpc', kind:'policy', ev:'E_ir_disclosure', title:'利率變動型保險商品資訊揭露、通知及內部控制相關資料'},
+  {no:23, date:'2026-06-15', ingest:'2026-06-15', src:'edn', kind:'company', ev:'E_inv_launch', title:'壽險公司推出投資型、分紅及外幣保險商品相關報導'},
+  {no:24, date:'2026-05-19', ingest:'2026-05-19', src:'edn', kind:'stat', ev:'E_inv_apr', title:'前4月投資型壽險及投資型年金銷售成長相關報導'},
+  {no:25, date:'2026-04-29', ingest:'2026-10-12', src:'edn', kind:'stat', ev:'E_fx_feb', title:'前2月外幣保單及美元投資型保單銷售成長相關報導'},
+];
+
+// 去重後的獨立事件
+const EVENTS = {
+  E_inv_q1:{sum:'壽險業首季新契約保費 3682 億元，投資型保單年增逾 5 成。'},
+  E_fx_feb:{sum:'前 2 月外幣保單及美元投資型保單銷售成長。'},
+  E_inv_apr:{sum:'前 4 月投資型壽險及投資型年金銷售延續成長。'},
+  E_inv_launch:{sum:'壽險公司推出投資型、分紅及外幣保險商品，增加商品布局。'},
+  E_inv_aug:{sum:'壽險業前 8 月新契約保費破兆元，投資型保單年增 135%。'},
+  E_spill_stat:{sum:'消保會資料揭露外溢效果及實物給付型保險商品銷售情形。'},
+  E_spill_growth:{sum:'外溢保單市場與多家壽險公司銷售成長。'},
+  E_spill_reward:{sum:'外溢保單回饋機制由保費折減延伸至點數、保障、健康服務與數位平台。'},
+  E_ir_disclosure:{sum:'消保會就利率變動型保險商品的資訊揭露、通知及內部控制提出相關資料。'},
+  E_fx_h1:{sum:'外幣保單上半年新契約保費 2865 億元，創 5 年同期新高。'},
+  E_ir_cool:{sum:'利變型壽險及利變型年金前 7 月銷售降溫。'},
+  E_fx_jul:{sum:'金管會公布壽險業 115 年截至 7 月底外幣保險商品銷售情形。'},
+  E_rate_dec:{sum:'Fed 升息後壽險業未跟進調整，10 月美元宣告利率天花板維持 4.42%。'},
+  E_wm_khh:{sum:'高雄資產管理專區推動保險商品，鎖定高資產客群。'},
+  E_wm_policy:{sum:'金管會開放財富管理保險商品不適用死亡給付對保價金最低比率規範。'},
+  E_health:{sum:'金管會放寬保險業投資五大類健康福祉事業，串聯健康促進、長照服務與全齡金融。'},
+  E_vc:{sum:'金管會預告修正專案運用公共及社會福利事業投資管理辦法，鼓勵保險業資金投入創投事業。'},
+  E_aging:{sum:'評論報導：高齡化使保險業與保單面臨轉型。'},
+  E_pet:{sum:'產險業者推出寵物險，擴大毛孩保障。'},
+  E_costco:{sum:'好市多與國泰產險合作推出會員專屬旅遊、車險等保險方案。'},
+  E_orsa:{sum:'金管會發布保險業自我風險及清償能力評估機制指引。'},
+  E_presale:{sum:'壽險公會訂定保險商品銷售前程序作業準則。'},
+  E_q6:{sum:'內文為外溢效果及實物給付型保險商品銷售統計，但標題與日期標示為另一份監理指引。'},
+};
+for (const [id,e] of Object.entries(EVENTS)){
+  e.id=id; e.docs=DOCS.filter(d=>d.ev===id);
+  const ds=e.docs.map(d=>d.date).filter(Boolean).sort();
+  e.date=ds[0]||null;
+  e.kind=e.docs.find(d=>!d.dupOf)?.kind||e.docs[0].kind;
+}
+
+// 市場訊號（評分與理由依提案測試結果整理；時效性由系統依日期計算）
+const SIGNALS = [
+ {id:'S1', short:'投資型保單', cats:['inv','ir'],
+  name:'投資型保單銷售動能持續增強，並伴隨商品與通路投入',
+  summary:'不同時間公布的市場統計持續顯示投資型保單新契約保費成長，年增幅度由首季逾 5 成擴大到前 8 月 135%。期間壽險公司陸續推出投資型及外幣保險商品，商品與通路投入跟上銷售動能。目前沒有出現反向證據，判斷市場方向持續存在。',
+  es:{v:5, why:'5 項獨立事件：首季、前 2 月、前 4 月、前 8 月四期市場統計，加上 1 項公司商品布局。來源涵蓋中央社與經濟日報，均未與其他事件重複。'},
+  c:{v:5, why:'全部獨立事件皆指向投資型保單銷售成長，未出現銷售下降或業者縮減的反向資料。'},
+  m:{v:5, why:'前 8 月投資型保單新契約保費年增 135%，首季年增逾 5 成，具明確年增比較基礎且幅度大。'},
+  i:{v:5, why:'屬全壽險業新契約保費統計（前 8 月破兆元），並涉及多家公司的商品與通路布局，屬產業層級變化。'},
+  evidence:[
+    {ev:'E_inv_q1', dir:'support', note:'首次出現投資型保單明顯成長的統計。'},
+    {ev:'E_fx_feb', dir:'support', note:'美元投資型保單同步成長，屬不同統計期間的獨立證據。'},
+    {ev:'E_inv_apr', dir:'support', note:'下一期統計延續相同方向。'},
+    {ev:'E_inv_launch', dir:'support', note:'市場參與者增加商品供給，訊號出現新的發展形式。'},
+    {ev:'E_inv_aug', dir:'support', note:'累計統計顯示成長持續並擴大。'},
+  ],
+  history:[
+    {date:'2026-04-16', st:'new', ev:'E_inv_q1', why:'首季統計首次觀察到投資型保單年增逾 5 成。'},
+    {date:'2026-05-19', st:'per', ev:'E_inv_apr', why:'前 4 月統計延續成長，方向跨越兩個時間點。'},
+    {date:'2026-06-15', st:'dev', ev:'E_inv_launch', why:'壽險公司推出投資型與外幣商品，趨勢由銷售擴展到商品布局。'},
+    {date:'2026-09-16', st:'per', ev:'E_inv_aug', why:'前 8 月統計年增 135%，多期資料方向一致，未見反向變化。'},
+  ]},
+ {id:'S2', short:'外溢保單', cats:['med'],
+  name:'外溢保單市場成長，競爭由單純保費折減擴展至多元健康回饋與服務機制',
+  summary:'消保會資料揭露外溢效果商品的銷售情形，10 月報導指出多家壽險公司外溢保單銷售成長。同時回饋機制從保費折減延伸到點數、保障、健康服務與數位平台，代表競爭形式出現新的發展。另有一筆內容相關的資料因標題與日期矛盾，確認前不計入證據。',
+  es:{v:4, why:'3 項獨立事件：1 項主管機關資料與 2 項產業報導。#6 雖內容相關，但存在品質警示，確認前不計入。'},
+  c:{v:4, why:'現有事件皆指向市場成長；但消保會資料與 10 月報導的統計期間不同，方向一致但比較基礎不完全相同。'},
+  m:{v:4, why:'以消保會銷售資料的前後期比較判斷成長屬明顯；10 月報導中的「成長」描述未附可比較數據，不納入幅度判斷。'},
+  i:{v:5, why:'涉及多家壽險公司，並改變健康險商品的回饋設計與服務模式，屬特定商品市場層級且直接影響商品設計。'},
+  evidence:[
+    {ev:'E_spill_stat', dir:'support', note:'主管機關資料提供外溢商品銷售基礎。'},
+    {ev:'E_spill_growth', dir:'support', note:'多家業者銷售成長，市場參與者擴大。'},
+    {ev:'E_spill_reward', dir:'support', note:'回饋機制多元化，屬新的發展形式。'},
+    {ev:'E_q6', dir:'hold', note:'內容與外溢商品相關，但原始資料存在品質問題，標記待確認。'},
+  ],
+  history:[
+    {date:'2026-08-06', st:'new', ev:'E_spill_stat', why:'首次取得外溢效果商品銷售資料。'},
+    {date:'2026-10-10', st:'dev', ev:'E_spill_reward', why:'多家公司銷售成長，且回饋機制由保費折減擴展至點數、健康服務與數位平台。'},
+  ]},
+ {id:'S3', short:'利變型保單', cats:['ir','ann'],
+  name:'利變型保單由前期銷售支撐轉為整體買氣降溫，但美元及高資產特定市場仍有需求',
+  summary:'前期統計顯示外幣保單銷售強勁，上半年新契約保費 2865 億元、創 5 年同期新高。但較新的前 7 月資料顯示利變型壽險及年金銷售降溫，10 月美元宣告利率也維持 4.42% 未上調。整體買氣轉弱，美元及高資產客群仍有需求，因此保留訊號並標示為轉弱。',
+  es:{v:5, why:'5 項獨立事件，橫跨 4 月至 9 月，來源包含金管會、中央社、經濟日報與聯合新聞網。消保會資訊揭露資料屬監理背景，不計入。'},
+  c:{v:3, why:'前 2 月與上半年統計顯示成長，前 7 月資料與宣告利率動態則指向降溫；證據方向出現分歧。'},
+  m:{v:4, why:'上半年外幣保單新契約保費創 5 年同期新高，與前 7 月利變型銷售降溫形成明顯轉折。'},
+  i:{v:4, why:'涉及利變型壽險、利變型年金及美元保單等多家公司的主力商品；宣告利率走向影響後續商品定價。'},
+  evidence:[
+    {ev:'E_fx_feb', dir:'support', note:'前期外幣保單銷售成長。'},
+    {ev:'E_ir_disclosure', dir:'context', note:'監理對利變型商品資訊揭露的要求，作為背景保留，不計入證據。'},
+    {ev:'E_fx_h1', dir:'support', note:'上半年外幣保單創 5 年同期新高。'},
+    {ev:'E_ir_cool', dir:'counter', note:'較新期間資料顯示利變型壽險及年金銷售降溫。'},
+    {ev:'E_fx_jul', dir:'support', note:'主管機關外幣商品統計，作為美元保單特定需求的比對依據。'},
+    {ev:'E_rate_dec', dir:'counter', note:'宣告利率維持不變，未見回升動能。'},
+  ],
+  history:[
+    {date:'2026-04-29', st:'new', ev:'E_fx_feb', why:'前 2 月外幣保單銷售成長，首次觀察到此方向。'},
+    {date:'2026-08-25', st:'per', ev:'E_fx_h1', why:'上半年外幣保單創 5 年同期新高，方向跨期延續。'},
+    {date:'2026-08-31', st:'weak', ev:'E_ir_cool', why:'較新的前 7 月資料顯示利變型壽險及年金銷售降溫，與前期方向相反。'},
+    {date:'2026-09-30', st:'weak', ev:'E_rate_dec', why:'宣告利率維持 4.42%，未見回升動能，維持轉弱。'},
+  ]},
+ {id:'S4', short:'財富管理型', cats:['inv','ir'],
+  name:'財富管理型保險由高雄專區試辦銷售進一步走向制度性擴張',
+  summary:'8 月高雄資產管理專區開始推動保險商品並鎖定高資產客群，10 月金管會正式開放財富管理保險商品不適用死亡給付最低比率規範，趨勢由地區試辦走向制度鬆綁。政策剛發布，尚無保費或件數可比較，變化幅度暫列資料不足。',
+  es:{v:3, why:'2 項獨立事件：高雄專區市場發展報導與金管會正式政策，來源不同且性質互補。'},
+  c:{v:4, why:'兩項事件方向一致，都指向財富管理型保險業務擴大；事件數較少，一致性判斷基礎有限。'},
+  m:{v:null, why:'政策於 10/08 剛發布，市場尚未產生保費、件數等可比較數據，無法判斷變化程度。'},
+  i:{v:3, why:'目前適用於財富管理保險商品與高資產客群，屬特定商品與客群層級。'},
+  evidence:[
+    {ev:'E_wm_khh', dir:'support', note:'專區試辦，首次出現此市場方向。'},
+    {ev:'E_wm_policy', dir:'support', note:'主管機關制度鬆綁，市場方向擴大。'},
+  ],
+  history:[
+    {date:'2026-08-20', st:'new', ev:'E_wm_khh', why:'高雄專區開始推動財富管理型保險商品。'},
+    {date:'2026-10-08', st:'dev', ev:'E_wm_policy', why:'由專區試辦進一步走向全國性制度鬆綁。'},
+  ]},
+ {id:'S5', short:'健康福祉投資', cats:['ltc','med'],
+  name:'健康福祉事業投資限制放寬',
+  summary:'金管會放寬保險業投資五大類健康福祉事業，串聯健康促進、長照服務與全齡金融。聯合新聞網同日報導屬同一事件，已合併計算。政策影響範圍廣，但目前只有一項獨立事件，證據一致性暫列資料不足，需持續追蹤後續業者動作。',
+  es:{v:3, why:'1 項獨立事件，由主管機關正式發布。聯合新聞網同日報導來源相同，去重後不重複計入。'},
+  c:{v:null, why:'目前只有一項獨立事件，沒有其他證據可以比較方向是否一致。'},
+  m:{v:3, why:'以法規變動範圍判斷：投資範圍擴大至五大類健康福祉事業；尚無投資金額數據，判為中度。'},
+  i:{v:5, why:'適用全體保險業資金運用，並連結健康促進與長照服務，可能影響長照、健康相關商品設計與資金布局。'},
+  evidence:[
+    {ev:'E_health', dir:'support', note:'主管機關正式發布的政策，首次出現此方向。'},
+  ],
+  related:[
+    {ev:'E_vc', why:'同屬保險業資金運用鬆綁，但目前為預告修正階段，待正式發布後重新評估關聯。'},
+    {ev:'E_aging', why:'屬業界觀點與趨勢評論，未描述具體市場事件，不納入證據支持度。'},
+  ],
+  history:[
+    {date:'2026-10-06', st:'new', ev:'E_health', why:'主管機關新發布的監理政策，首次觀察到此方向。'},
+  ]},
+];
+
+// 尚未形成訊號的觀察中資料
+const WATCH = [
+  {ev:'E_costco', cats:['acc'], why:'單一通路合作案，尚未出現其他業者跟進或銷售數據。'},
+  {ev:'E_pet', cats:['grp'], why:'寵物險屬產險商品，目前僅 1 項獨立事件（#9、#12 為重複收錄，已合併）。'},
+  {ev:'E_vc', cats:[], why:'預告修正階段，與「健康福祉事業投資限制放寬」同屬資金運用鬆綁，待正式發布。'},
+  {ev:'E_aging', cats:['ann','ltc'], why:'業界觀點與趨勢評論，未描述具體市場事件。'},
+  {ev:'E_orsa', cats:[], why:'監理制度指引，與現有訊號無直接市場方向關聯。另有同標題的 #6 內文不符，已提出品質警示。'},
+  {ev:'E_presale', cats:[], why:'2025 年銷售前程序規範，作為法規背景保留。'},
+];
+
+const STATUS = {
+  new:{label:'新出現', en:'New', g:'◆', cls:'st-new', color:'var(--st-new)', desc:'近期首次被觀察到，已有初步證據，尚待後續資訊確認是否延續。'},
+  dev:{label:'發展中', en:'Developing', g:'▲', cls:'st-dev', color:'var(--st-dev)', desc:'新的獨立事件顯示市場方向正在擴大、深化或出現新的發展形式。'},
+  per:{label:'持續', en:'Persistent', g:'■', cls:'st-per', color:'var(--st-per)', desc:'相同方向跨越不同時間點，並持續獲得新的獨立證據支持。'},
+  weak:{label:'轉弱', en:'Weakening', g:'▼', cls:'st-weak', color:'var(--st-weak)', desc:'較新的證據顯示成長趨緩、銷售下降、動能停滯或反向變化。'},
+};
+const DIR = {support:'支持', counter:'反向', context:'背景（不計入）', hold:'待確認（不計入）'};
+
+/* ===================== 計算 ===================== */
+const utc = d=>{const [y,m,dd]=d.split('-').map(Number);return Date.UTC(y,m-1,dd)};
+const days = (a,b)=>Math.round((utc(b)-utc(a))/864e5);
+const fmt = d=>d?d.replaceAll('-','/'):'日期待確認';
+const esc = s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f2 = v=>v==null?'—':v.toFixed(2);
+
+const RECENCY = [[14,5],[45,4],[90,3],[180,2],[Infinity,1]];
+const recencyScore = d=>RECENCY.find(([max])=>d<=max)[1];
+
+function composite(vals){
+  const v=vals.filter(x=>x!=null);
+  if(!v.length) return {score:null, kind:'none', n:0, of:vals.length};
+  return {score:v.reduce((a,b)=>a+b,0)/v.length, kind:v.length===vals.length?'formal':'prov', n:v.length, of:vals.length};
+}
+function statusAt(s,date){let st=null;for(const h of s.history){if(h.date<=date)st=h.st}return st}
+
+for(const s of SIGNALS){
+  const valid=s.evidence.filter(e=>e.dir==='support'||e.dir==='counter');
+  const latest=valid.map(e=>EVENTS[e.ev].date).sort().at(-1);
+  const rd=days(latest,BASE);
+  s.r={v:recencyScore(rd), why:`最新有效事件發布於 ${fmt(latest)}，距資料基準日 ${rd} 天。依事件發布日期計算，不以收錄日期計算。`};
+  s.cred=composite([s.es.v,s.c.v]);
+  s.sig=composite([s.r.v,s.m.v,s.i.v]);
+  const all=[s.es.v,s.c.v,s.r.v,s.m.v,s.i.v];
+  s.nValid=all.filter(x=>x!=null).length;
+  s.complete=s.nValid/5*100;
+  s.status=s.history.at(-1).st;
+  s.latest=latest;
+  s.nIndep=valid.length;
+  s.warnings=s.evidence.filter(e=>EVENTS[e.ev].docs.some(d=>d.warn)).length;
+  const c=s.cred.score??0, g=s.sig.score??0;
+  s.action = c>=3.75&&g>=3.75?'優先關注': g>=3.75?'持續追蹤': c>=3.75?'定期檢視':'補充調查';
+}
+
+/* ===================== 狀態 ===================== */
+const state={view:'dash', cat:'all', sort:'sig', sel:null, q:''};
+try{const saved=JSON.parse(localStorage.getItem('ms-prefs')||'{}');if(saved.cat&&(saved.cat==='all'||CAT[saved.cat]))state.cat=saved.cat;if(saved.sort)state.sort=saved.sort}catch(e){}
+function savePrefs(){try{localStorage.setItem('ms-prefs',JSON.stringify({cat:state.cat,sort:state.sort}))}catch(e){}}
+if(['data','method'].includes(location.hash.slice(1))) state.view=location.hash.slice(1);
+
+const app=document.getElementById('app');
+document.getElementById('baseDate').textContent=fmt(BASE);
+
+function go(view,sel){state.view=view;state.sel=sel||null;render();window.scrollTo(0,0)}
+
+/* ===================== 共用元件 ===================== */
+const pill = st=>`<span class="pill ${STATUS[st].cls}"><span class="g" aria-hidden="true">${STATUS[st].g}</span>${STATUS[st].label}</span>`;
+const kindTag = k=>({formal:'<span class="tag formal">正式</span>',prov:'<span class="tag prov">暫定</span>',none:'<span class="tag none">無法評估</span>'})[k];
+const catNames = ids=>ids.map(id=>CAT[id].name).join(' · ');
+const segs = v=>v==null?`<div class="segs na" aria-hidden="true">${'<i></i>'.repeat(5)}</div>`:`<div class="segs" aria-hidden="true">${[1,2,3,4,5].map(i=>`<i class="${i<=v?'on':''}"></i>`).join('')}</div>`;
+
+function metric(label,comp){
+  return `<div class="m"><div class="m-label"><span>${label}</span>${kindTag(comp.kind)}</div>
+    ${comp.score==null?'<div class="m-val na">資料不足</div>':`<div class="m-val">${f2(comp.score)}</div>`}
+    <div class="note">${comp.n}/${comp.of} 項有效</div></div>`;
+}
+function card(s){
+  return `<article class="card">
+    <div class="card-top">${pill(s.status)}<span class="cats">${catNames(s.cats)}</span></div>
+    <h3><button class="card-link" data-open="${s.id}">${esc(s.name)}</button></h3>
+    <div class="metrics">
+      ${metric('可信度',s.cred)}
+      ${metric('重大性',s.sig)}
+      <div class="m"><div class="m-label"><span>資料完整度</span></div><div class="m-val">${s.complete}%</div><div class="bar"><i style="width:${s.complete}%"></i></div></div>
+    </div>
+    <div class="card-foot">
+      <span>最新事件 <span class="num">${fmt(s.latest)}</span></span>
+      <span>獨立事件 <span class="num">${s.nIndep}</span></span>
+      <span class="action">建議：${s.action}</span>
+      ${s.warnings?`<span class="warnflag">⚠ 資料品質警示 ${s.warnings}</span>`:''}
+    </div>
+  </article>`;
+}
+
+/* ===================== 儀表板 ===================== */
+function changes(){
+  const items=[];
+  for(const s of SIGNALS){
+    const p=statusAt(s,PREV);
+    if(!p) items.push({cls:'c-new',ico:'＋',html:`新增訊號：<button class="linkish" data-open="${s.id}">${esc(s.short)}</button>（${STATUS[s.status].label}）`});
+    else if(p!==s.status) items.push({cls:'c-status',ico:'↗',html:`<button class="linkish" data-open="${s.id}">${esc(s.short)}</button>：${STATUS[p].label} → ${STATUS[s.status].label}`});
+  }
+  const back=DOCS.filter(d=>d.date&&d.ingest>PREV&&d.date<PREV&&days(d.date,d.ingest)>14);
+  if(back.length) items.push({cls:'',ico:'↺',html:`補收錄 ${back.length} 筆歷史資料（${back.map(d=>'#'+d.no).join('、')}），已依發布日期排回時間軸，未視為最新事件`});
+  const dups=DOCS.filter(d=>d.dupOf&&d.ingest>PREV);
+  if(dups.length) items.push({cls:'',ico:'⧉',html:`合併 ${dups.length} 筆重複報導（${dups.map(d=>`#${d.no}→#${d.dupOf}`).join('、')}），不重複計入證據`});
+  const w=DOCS.filter(d=>d.warn&&d.ingest>PREV);
+  if(w.length) items.push({cls:'c-warn',ico:'!',html:`新增 ${w.length} 筆原始資料品質警示（${w.map(d=>'#'+d.no).join('、')}），確認前不計入證據`});
+  return `<section class="changes" aria-labelledby="chg">
+    <div class="changes-head"><h2 id="chg">近期市場變化摘要</h2><span>本次更新 ${fmt(BASE)}，與上次更新 ${fmt(PREV)} 比較</span></div>
+    <ul class="change-list">${items.map(i=>`<li><span class="change-ico ${i.cls}" aria-hidden="true">${i.ico}</span><span>${i.html}</span></li>`).join('')}</ul>
+  </section>`;
+}
+
+function matrix(list){
+  const W=560,H=340,L=46,R=18,T=14,B=46;
+  const xd=[2.5,5.25], yd=[3,5];
+  const x=v=>L+(v-xd[0])/(xd[1]-xd[0])*(W-L-R);
+  const y=v=>T+(1-(v-yd[0])/(yd[1]-yd[0]))*(H-T-B);
+  const ids=new Set(list.map(s=>s.id));
+  let g='';
+  for(const t of [3,3.5,4,4.5,5]){
+    g+=`<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H-B}" stroke="var(--line)" stroke-width="1"/>`;
+    g+=`<text x="${x(t)}" y="${H-B+16}" text-anchor="middle" font-size="11" fill="var(--muted)" class="num">${t.toFixed(1)}</text>`;
+    g+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
+    g+=`<text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${t.toFixed(1)}</text>`;
+  }
+  g+=`<line x1="${x(3.75)}" x2="${x(3.75)}" y1="${T}" y2="${H-B}" stroke="var(--line-2)" stroke-dasharray="4 4" stroke-width="1.5"/>`;
+  g+=`<line x1="${L}" x2="${W-R}" y1="${y(3.75)}" y2="${y(3.75)}" stroke="var(--line-2)" stroke-dasharray="4 4" stroke-width="1.5"/>`;
+  const ql=(tx,ty,anchor,txt)=>`<text x="${tx}" y="${ty}" text-anchor="${anchor}" font-size="12" font-weight="500" fill="var(--muted)">${txt}</text>`;
+  g+=ql(W-R-6,T+16,'end','優先關注')+ql(L+6,T+16,'start','持續追蹤')+ql(W-R-6,H-B-8,'end','定期檢視')+ql(L+6,H-B-8,'start','補充調查');
+  g+=`<text x="${(L+W-R)/2}" y="${H-8}" text-anchor="middle" font-size="12" fill="var(--ink-2)">可信度 Credibility →</text>`;
+  g+=`<text transform="translate(12 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="12" fill="var(--ink-2)">重大性 Significance →</text>`;
+  for(const s of SIGNALS){
+    const cx=x(s.cred.score), cy=y(s.sig.score), on=ids.has(s.id);
+    const prov=s.cred.kind!=='formal'||s.sig.kind!=='formal';
+    const col=STATUS[s.status].color;
+    const left=s.cred.score>=4.75;
+    g+=`<g class="pt" data-id="${s.id}" tabindex="0" role="button" aria-label="${esc(s.short)}：可信度 ${f2(s.cred.score)}，重大性 ${f2(s.sig.score)}，${STATUS[s.status].label}" style="cursor:pointer;opacity:${on?1:.22}">
+      <circle cx="${cx}" cy="${cy}" r="16" fill="transparent"/>
+      <circle cx="${cx}" cy="${cy}" r="7" fill="${prov?'var(--surface)':col}" stroke="${prov?col:'var(--surface)'}" stroke-width="${prov?2.5:2}"/>
+      <text x="${left?cx-12:cx+12}" y="${cy+4}" text-anchor="${left?'end':'start'}" font-size="12.5" font-weight="500" fill="var(--ink)">${esc(s.short)}</text>
+    </g>`;
+  }
+  return `<div class="chart-wrap" id="mx"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="市場訊號優先順序矩陣">${g}</svg><div class="tip" hidden></div></div>
+  <div class="legend">${Object.values(STATUS).map(st=>`<span><i style="background:${st.color}"></i>${st.label}</span>`).join('')}<span><i class="hollow"></i>含暫定分數</span></div>`;
+}
+
+function bindMatrix(){
+  const wrap=document.getElementById('mx'); if(!wrap) return;
+  const tip=wrap.querySelector('.tip');
+  const show=el=>{
+    const s=SIGNALS.find(x=>x.id===el.dataset.id);
+    const c=el.querySelectorAll('circle')[1].getBoundingClientRect(), w=wrap.getBoundingClientRect();
+    tip.innerHTML=`<b>${esc(s.short)}</b>　${STATUS[s.status].label}<br>可信度 ${f2(s.cred.score)}（${s.cred.kind==='formal'?'正式':'暫定'}）<br>重大性 ${f2(s.sig.score)}（${s.sig.kind==='formal'?'正式':'暫定'}）<br>資料完整度 ${s.complete}%`;
+    tip.hidden=false;
+    const left=Math.min(Math.max(c.left-w.left+c.width/2,110),w.width-110);
+    tip.style.left=left+'px'; tip.style.top=(c.top-w.top)+'px';
+  };
+  wrap.querySelectorAll('.pt').forEach(el=>{
+    el.addEventListener('pointerenter',()=>show(el));
+    el.addEventListener('focus',()=>show(el));
+    el.addEventListener('pointerleave',()=>tip.hidden=true);
+    el.addEventListener('blur',()=>tip.hidden=true);
+    el.addEventListener('click',()=>go('detail',el.dataset.id));
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go('detail',el.dataset.id)}});
+  });
+}
+
+function renderDash(){
+  const inCat=s=>state.cat==='all'||s.cats.includes(state.cat);
+  let list=SIGNALS.filter(inCat);
+  const key={sig:s=>s.sig.score??-1, cred:s=>s.cred.score??-1, date:s=>utc(s.latest)}[state.sort];
+  list=[...list].sort((a,b)=>key(b)-key(a));
+  const watch=WATCH.filter(w=>state.cat==='all'||w.cats.includes(state.cat));
+  const count=id=>SIGNALS.filter(s=>s.cats.includes(id)).length;
+  app.innerHTML=`
+  <div class="view-head"><div><div class="eyebrow">MARKET SIGNAL DASHBOARD</div><h1>目前市場上值得注意的變化</h1></div>
+  <p>系統將市場統計、公司動態、新聞報導與法規政策分類、去重並關聯，形成可判讀的市場訊號。選擇您負責的商品類別，再點選訊號查看判斷依據。</p></div>
+  ${changes()}
+  <div class="filters">
+    <div class="chips" role="group" aria-label="保險商品類別">
+      <button class="chip" data-cat="all" aria-pressed="${state.cat==='all'}">全部類別<span class="n">${SIGNALS.length}</span></button>
+      ${CATS.map(c=>`<button class="chip" data-cat="${c.id}" aria-pressed="${state.cat===c.id}">${c.name}<span class="n">${count(c.id)}</span></button>`).join('')}
+    </div>
+    <label class="sort" for="sortSel">排序
+      <select id="sortSel">
+        <option value="sig" ${state.sort==='sig'?'selected':''}>重大性（高→低）</option>
+        <option value="cred" ${state.sort==='cred'?'selected':''}>可信度（高→低）</option>
+        <option value="date" ${state.sort==='date'?'selected':''}>最新更新時間</option>
+      </select>
+    </label>
+  </div>
+  <div class="dash">
+    <div class="cards">${list.length?list.map(card).join(''):`<div class="empty"><b>「${CAT[state.cat].name}」目前沒有形成市場訊號</b><br>系統會保留相關資料，待新的市場資訊加入後重新分析。${watch.length?`目前有 ${watch.length} 筆觀察中資料。`:'目前此類別也沒有觀察中資料。'}</div>`}</div>
+    <aside>
+      <section class="panel"><h2>優先順序矩陣</h2><p class="sub">可信度與重大性分開評估，不合併為單一總分。點選資料點查看詳細。</p>${matrix(list)}</section>
+      <section class="panel"><h2>觀察中資料</h2><p class="sub">事件關聯不足，暫不形成訊號；新資料加入後會重新分析。</p>
+        ${watch.length?`<ul class="watch">${watch.map(w=>{const e=EVENTS[w.ev];return `<li><div class="w-meta"><span class="num">${fmt(e.date)}</span> · ${SRC[e.docs[0].src].name} · ${KIND[e.kind]}${w.cats.length?' · '+catNames(w.cats):''}</div><div class="w-title">${esc(e.sum)}</div><div class="w-why">${esc(w.why)}</div></li>`}).join('')}</ul>`:'<p class="note">此類別目前沒有觀察中資料。</p>'}
+      </section>
+    </aside>
+  </div>`;
+  app.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{state.cat=b.dataset.cat;savePrefs();render()});
+  document.getElementById('sortSel').onchange=e=>{state.sort=e.target.value;savePrefs();render()};
+  bindMatrix();
+}
+
+/* ===================== 詳細頁 ===================== */
+function ind(name,en,o,rule){
+  return `<div class="ind"><div class="ind-head"><span class="ind-name">${name}<small>${en}</small></span>
+    ${o.v==null?'<span class="ind-score na">資料不足</span>':`<span class="ind-score">${o.v} / 5</span>`}</div>
+    ${segs(o.v)}<p class="ind-why">${esc(o.why)}</p>${rule?`<p class="ind-rule">${rule}</p>`:''}</div>`;
+}
+function group(title,en,comp,inner){
+  return `<section class="group"><div class="group-head"><div><h2>${title}</h2><div class="en">${en}</div></div>
+    <div class="group-score">${comp.score==null?'<div class="ind-score na">無法評估</div>':`<div class="num">${f2(comp.score)}</div>`}<div>${kindTag(comp.kind)} <span class="note">${comp.n}/${comp.of} 項有效</span></div></div></div>${inner}</section>`;
+}
+function docLine(d){
+  const s=SRC[d.src];
+  const late=d.date&&days(d.date,d.ingest)>14;
+  return `<li><span><span class="no">#${d.no}</span> <span class="src">${s.name}</span>　${esc(d.title)}</span>
+    ${d.dupOf?`<span class="flag dup">${d.dupKind||'同一事件之重複報導'}，已併入 #${d.dupOf}，不重複計入證據</span>`:''}
+    ${late?`<span class="flag late">${fmt(d.ingest)} 才收錄，依發布日期 ${fmt(d.date)} 排入時間軸</span>`:''}
+    <a href="${s.url}" target="_blank" rel="noopener">前往${s.name}網站 ↗</a></li>`;
+}
+function renderDetail(){
+  const s=SIGNALS.find(x=>x.id===state.sel); if(!s){go('dash');return}
+  const hByEv=Object.fromEntries(s.history.map(h=>[h.ev,h]));
+  const ev=[...s.evidence].sort((a,b)=>(EVENTS[a.ev].date||'9999').localeCompare(EVENTS[b.ev].date||'9999'));
+  const sigHi=(s.sig.score??0)>=4;
+  const compText = sigHi && s.complete===100 ? '重大性高＋資料完整度高：目前市場變化值得注意，且各項判斷資料相對完整。'
+    : sigHi ? '重大性高＋資料完整度未滿：已出現值得注意的市場變化，但部分資訊仍不足，需要持續追蹤。'
+    : '部分評估項目仍需更多資料確認。';
+  const labels=['證據支持度','證據一致性','時效性','變化幅度','影響程度'];
+  const vals=[s.es.v,s.c.v,s.r.v,s.m.v,s.i.v];
+  const warnDocs=s.evidence.flatMap(e=>EVENTS[e.ev].docs.filter(d=>d.warn));
+  app.innerHTML=`
+  <button class="back" data-view-go="dash">← 返回市場訊號</button>
+  <div class="d-head">
+    <div class="card-top">${pill(s.status)}<span class="cats">${catNames(s.cats)}</span></div>
+    <h1>${esc(s.name)}</h1>
+    <div class="d-path" aria-label="狀態變化">狀態歷程：${s.history.map(h=>`<span>${pill(h.st)} <span class="num">${fmt(h.date).slice(5)}</span></span>`).join('<span aria-hidden="true">→</span>')}</div>
+  </div>
+  <div class="d-summary"><div class="eyebrow">訊號摘要</div><p>${esc(s.summary)}</p></div>
+  <div class="detail">
+    <div>
+      <div class="groups">
+        ${group('可信度','Credibility',s.cred, ind('證據支持度','ES',s.es)+ind('證據一致性','C',s.c))}
+        ${group('重大性','Significance',s.sig, ind('時效性','R',s.r,'系統規則：≤14 天 5 分、≤45 天 4 分、≤90 天 3 分、≤180 天 2 分，其餘 1 分')+ind('變化幅度','M',s.m)+ind('影響程度','I',s.i))}
+      </div>
+      <div class="section-title"><h2>事件發展脈絡</h2><span>依事件發布日期排列，保留反向與待確認資料</span></div>
+      <ol class="timeline">${ev.map(e=>{const E=EVENTS[e.ev];const h=hByEv[e.ev];const wd=E.docs.filter(d=>d.warn);
+        return `<li class="tl d-${e.dir}">
+          <div class="tl-date ${E.date?'':'unk'}">${E.date?fmt(E.date):'日期待確認'}</div>
+          <div class="tl-body">
+            <div class="tl-tags"><span class="kind">${KIND[E.kind]}</span><span class="dir ${e.dir}">${DIR[e.dir]}</span>${E.docs.length>1?`<span class="flag">${E.docs.length} 筆資料 → 1 項獨立事件</span>`:''}</div>
+            <p class="tl-sum">${esc(E.sum)}</p>
+            <p class="tl-note">${esc(e.note)}</p>
+            ${h?`<div class="statusmark">${pill(h.st)}<span>狀態判定：${esc(h.why)}</span></div>`:''}
+            ${wd.map(d=>`<div class="warnbox"><b>⚠ 原始資料品質警示（#${d.no}，原始標示日期 ${fmt(d.labeled)}）</b><ul>${d.warn.map(w=>`<li>${esc(w)}</li>`).join('')}</ul><span>系統保留原始內容，不自行選定正確日期或修改內容；確認前不視為有效證據。</span></div>`).join('')}
+            <ul class="docs">${E.docs.map(docLine).join('')}</ul>
+          </div></li>`}).join('')}</ol>
+      ${s.related?`<div class="section-title"><h2>相關但未計入證據</h2></div><ul class="watch panel">${s.related.map(r=>{const E=EVENTS[r.ev];return `<li><div class="w-meta"><span class="num">${fmt(E.date)}</span> · ${SRC[E.docs[0].src].name} · ${KIND[E.kind]}</div><div class="w-title">${esc(E.sum)}</div><div class="w-why">${esc(r.why)}</div></li>`}).join('')}</ul>`:''}
+    </div>
+    <aside>
+      <section class="panel"><h2>資料完整度 <span class="num">${s.complete}%</span></h2>
+        <p class="sub">${s.nValid} / 5 項指標具備有效評分</p>
+        <div class="dots">${labels.map((l,i)=>`<span class="${vals[i]==null?'na':''}" title="${l}">${l.slice(0,2)}</span>`).join('')}</div>
+        <p class="note">${compText}</p>
+      </section>
+      <section class="panel"><h2>訊號狀態：${STATUS[s.status].label}</h2><p class="sub">${STATUS[s.status].en}</p><p class="note">${STATUS[s.status].desc}</p></section>
+      <section class="panel"><h2>建議：${s.action}</h2><p class="note">依可信度與重大性所在象限（門檻 3.75）。評估結果供商品規劃參考，不取代企劃人員的專業判斷。</p></section>
+      ${warnDocs.length?`<section class="panel"><h2 style="color:var(--warn)">⚠ 待確認資料 ${warnDocs.length} 筆</h2><p class="note">原始資料品質警示不直接降低可信度或重大性，但相關資料在確認前不計入證據。</p></section>`:''}
+    </aside>
+  </div>`;
+}
+
+/* ===================== 原始資料 ===================== */
+function linkedSignals(evId){
+  const out=[];
+  for(const s of SIGNALS){const e=s.evidence.find(x=>x.ev===evId);if(e)out.push(`<button class="linkish" data-open="${s.id}">${esc(s.short)}</button><span class="muted">（${DIR[e.dir].replace(/（.*）/,'')}）</span>`);
+    if(s.related?.some(r=>r.ev===evId))out.push(`<span class="muted">${esc(s.short)}（相關未計入）</span>`)}
+  if(!out.length&&WATCH.some(w=>w.ev===evId))out.push('<span class="muted">觀察中</span>');
+  return out.join('<br>')||'<span class="muted">—</span>';
+}
+function renderData(){
+  const q=state.q.trim().toLowerCase();
+  const rows=DOCS.filter(d=>!q||(d.title+SRC[d.src].name+KIND[d.kind]+d.no).toLowerCase().includes(q));
+  app.innerHTML=`
+  <div class="view-head"><div><div class="eyebrow">SOURCE RECORDS</div><h1>原始資料與處理結果</h1></div>
+  <p>每筆資料保留名稱、發布單位、發布日期、收錄日期與來源，並列出去重與事件關聯結果。時間判斷一律以發布日期為準。</p></div>
+  <div class="toolbar"><input class="search" id="q" type="search" placeholder="搜尋資料名稱、來源或編號" value="${esc(state.q)}" aria-label="搜尋原始資料">
+    <span class="note">共 ${DOCS.length} 筆資料，去重後 ${Object.keys(EVENTS).length} 項事件。提案參考資料未附原文網址，來源連結指向發布單位網站。</span></div>
+  <div class="table-scroll"><table class="dt">
+    <thead><tr><th>#</th><th>發布日期</th><th>收錄日期</th><th>來源</th><th>類型</th><th>資料名稱</th><th>去重結果</th><th>關聯訊號</th><th>品質</th></tr></thead>
+    <tbody>${rows.map(d=>{const E=EVENTS[d.ev];const late=d.date&&days(d.date,d.ingest)>14;
+      const dd=d.dupOf?`重複 → 併入 #${d.dupOf}`:E.docs.length>1?`獨立事件（含 ${E.docs.length} 筆）`:'獨立事件';
+      return `<tr><td class="num">${d.no}</td><td class="num">${d.date?fmt(d.date):`<span class="warncell">待確認</span><br><span class="muted">標示 ${fmt(d.labeled)}</span>`}</td>
+      <td class="num">${fmt(d.ingest)}${late?'<br><span class="muted">補收錄</span>':''}</td>
+      <td><a href="${SRC[d.src].url}" target="_blank" rel="noopener">${SRC[d.src].name}</a></td><td>${KIND[d.kind]}</td>
+      <td class="t">${esc(d.title)}</td><td>${dd}</td><td>${linkedSignals(d.ev)}</td>
+      <td>${d.warn?`<span class="warncell">⚠ ${d.warn.length} 項異常</span>`:'<span class="muted">—</span>'}</td></tr>`}).join('')}
+    ${rows.length?'':'<tr><td colspan="9" class="muted">沒有符合的資料，請換個關鍵字。</td></tr>'}</tbody>
+  </table></div>`;
+  const qi=document.getElementById('q');
+  qi.oninput=e=>{state.q=e.target.value;const pos=e.target.selectionStart;renderData();const n=document.getElementById('q');n.focus();n.setSelectionRange(pos,pos)};
+}
+
+/* ===================== 評估方法 ===================== */
+function classify(text){
+  return CATS.map(c=>({c, p:c.p.filter(k=>text.includes(k)), s:c.s.filter(k=>text.includes(k))})).filter(r=>r.p.length||r.s.length)
+    .sort((a,b)=>(b.p.length-a.p.length)||(b.s.length-a.s.length));
+}
+function clsOut(text){
+  const r=classify(text);
+  if(!text.trim()) return '<p class="note">輸入一段標題或內文即可測試。</p>';
+  if(!r.length) return '<p class="note">沒有命中任何關鍵字，此資料將交由語意分析判斷或保留為未分類。</p>';
+  return r.map(x=>`<div class="cls-row ${x.p.length?'':'cand'}"><span class="res">${x.p.length?'✓ ':'？'}${x.c.name}</span>
+    ${x.p.map(k=>`<span class="kwi p">${esc(k)}</span>`).join('')}${x.s.map(k=>`<span class="kwi">${esc(k)}</span>`).join('')}
+    ${x.p.length?'':'<span class="note">僅命中次要關鍵字，不直接判定，需搭配內容確認</span>'}</div>`).join('');
+}
+function renderMethod(){
+  app.innerHTML=`
+  <div class="view-head"><div><div class="eyebrow">METHODOLOGY</div><h1>評估方法與分類詞庫</h1></div>
+  <p>能以明確條件計算的項目採固定規則；需要理解語意與市場脈絡的項目，由生成式 AI 依既定標準判讀。資料不足時標示「資料不足」，不以零分代替。</p></div>
+  <div class="method">
+    <section class="block"><h2>市場訊號生成流程</h2>
+      <ol class="steps">
+        <li><b>資料蒐集</b><span>保留名稱、發布單位、發布日期、內容與原始連結</span></li>
+        <li><b>八大保險分類</b><span>主要／次要關鍵字詞庫，可多重分類</span></li>
+        <li><b>資料去重</b><span>同一統計、政策或公司行動只算一項事件</span></li>
+        <li><b>事件關聯</b><span>依時間脈絡判斷相同、延續或反向的市場變化</span></li>
+        <li><b>訊號評估</b><span>可信度、重大性、狀態、完整度與品質警示</span></li>
+        <li><b>市場訊號形成</b><span>關聯不足時不強制形成，保留資料待後續分析</span></li>
+      </ol>
+    </section>
+    <section class="block"><h2>計算方式</h2>
+      <p>各指標採 0～5 分制。綜合分數只平均具有效評分的項目：全部有效為「正式」，部分有效為「暫定」，全部無效為「無法評估」。</p>
+      <div class="formula">Credibility = (ES + C) / 2<br>Significance = (R + M + I) / 3<br>Data Completeness = N<sub>valid</sub> / 5 × 100%</div>
+      <div class="table-scroll"><table class="kv" style="min-width:640px">
+        <thead><tr><th>市場訊號</th><th>ES</th><th>C</th><th>R</th><th>M</th><th>I</th><th>可信度</th><th>重大性</th><th>完整度</th><th>狀態</th></tr></thead>
+        <tbody>${SIGNALS.map(s=>`<tr><td><button class="linkish" data-open="${s.id}">${esc(s.short)}</button></td>${[s.es.v,s.c.v,s.r.v,s.m.v,s.i.v].map(v=>`<td class="num">${v??'N/A'}</td>`).join('')}
+          <td class="num">${f2(s.cred.score)} ${kindTag(s.cred.kind)}</td><td class="num">${f2(s.sig.score)} ${kindTag(s.sig.kind)}</td><td class="num">${s.complete}%</td><td>${pill(s.status)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>
+    <section class="block"><h2>規則與 AI 的分工</h2>
+      <div class="table-scroll"><table class="kv" style="min-width:520px">
+        <thead><tr><th>處理內容</th><th>處理方式</th></tr></thead>
+        <tbody>
+          <tr><td>商品初步分類</td><td>關鍵字詞庫與分類規則</td></tr>
+          <tr><td>資料去重</td><td>生成式 AI 比較事件主體、日期、主要數據與來源</td></tr>
+          <tr><td>事件關聯</td><td>生成式 AI 判斷事件間的市場關係</td></tr>
+          <tr><td>證據支持度</td><td>依去重後的獨立事件判斷</td></tr>
+          <tr><td>證據一致性</td><td>生成式 AI 依既定標準判斷</td></tr>
+          <tr><td>時效性</td><td>依事件日期與固定區間計算：≤14 天 5 分、≤45 天 4 分、≤90 天 3 分、≤180 天 2 分、其餘 1 分</td></tr>
+          <tr><td>變化幅度</td><td>生成式 AI 依數據與比較基準判斷，不依新聞用語強弱推測</td></tr>
+          <tr><td>影響程度</td><td>生成式 AI 依影響的商品、公司或市場範圍判斷</td></tr>
+          <tr><td>資料完整度、綜合分數</td><td>固定公式計算</td></tr>
+        </tbody></table></div>
+    </section>
+    <section class="block"><h2>訊號狀態</h2>
+      <div class="table-scroll"><table class="kv" style="min-width:520px"><tbody>
+        ${Object.values(STATUS).map(st=>`<tr><td style="white-space:nowrap"><span class="pill ${st.cls}"><span class="g">${st.g}</span>${st.label}</span></td><td>${st.desc}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p>狀態不是固定的生命週期，每次加入新的有效事件都會依最新證據重新判斷，並保留判定依據。</p>
+    </section>
+    <section class="block classify"><h2>關鍵字分類測試</h2>
+      <p>主要關鍵字可直接判定類別；只命中次要關鍵字時列為候選，需搭配內容確認。一筆資料可同時屬於多個類別。</p>
+      <label for="clsIn" class="note">輸入標題或內文</label>
+      <textarea id="clsIn">壽險業前8月新契約保費破兆元，投資型保單年增135%，美元利變型保單買氣降溫</textarea>
+      <div class="cls-out" id="clsOut"></div>
+    </section>
+    <section class="block"><h2>八大保險分類詞庫</h2>
+      ${CATS.map(c=>`<details class="kw"><summary>${c.name}</summary>
+        <div class="kwrow"><b>主要關鍵字</b>${c.p.map(k=>`<span class="kwi p">${k}</span>`).join('')}</div>
+        <div class="kwrow"><b>次要關鍵字</b>${c.s.map(k=>`<span class="kwi">${k}</span>`).join('')}</div></details>`).join('')}
+    </section>
+    <section class="block"><h2>資料來源</h2>
+      <p>中央社（新聞、政府政策調整）、金管會保險局（財務資料、市場與產業統計）、壽險公會（法規公告、公司重大資訊揭露）、保險代理人公會（各大網站新聞彙整）。測試資料另包含經濟日報、聯合新聞網與行政院消費者保護會。</p>
+    </section>
+  </div>`;
+  const ta=document.getElementById('clsIn'), out=document.getElementById('clsOut');
+  const run=()=>out.innerHTML=clsOut(ta.value); ta.oninput=run; run();
+}
+
+/* ===================== 路由 ===================== */
+function render(){
+  document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-current', (t.dataset.view===state.view||(state.view==='detail'&&t.dataset.view==='dash'))?'page':'false'));
+  ({dash:renderDash, detail:renderDetail, data:renderData, method:renderMethod})[state.view]();
+}
+document.addEventListener('click',e=>{
+  const o=e.target.closest('[data-open]'); if(o){go('detail',o.dataset.open);return}
+  const v=e.target.closest('[data-view],[data-view-go]'); if(v){go(v.dataset.view||v.dataset.viewGo)}
+});
+render();
+</script>
