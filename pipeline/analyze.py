@@ -6,10 +6,10 @@
 """
 import json
 import re
-from collections import Counter
 from datetime import date
 
-from config import AI_MODEL, CATEGORIES, EXCLUDE_TERMS, GENERAL_TERMS, SIGNAL_WINDOW_DAYS, SOURCES
+from config import (AI_MODEL, CATEGORIES, CATEGORY_SHORT, CLASSIFY_IGNORE, EXCLUDE_TERMS, GENERAL_TERMS,
+                    INDUSTRY_THEMES, SIGNAL_WINDOW_DAYS, SOURCES)
 
 CAT = {c["id"]: c for c in CATEGORIES}
 SRC_PRIORITY = {"ib": 0, "lia": 1, "cna": 2, "ciaa": 3}
@@ -20,9 +20,13 @@ def days_between(a, b):
 
 
 # ---------------- 分類 ----------------
-def classify(text):
-    """主要關鍵字直接判定類別；可同時屬於多個類別。"""
-    return [c["id"] for c in CATEGORIES if any(k in text for k in c["p"])]
+def classify(title, body=""):
+    """主要關鍵字與擴充關鍵字直接判定類別；可同時屬於多個類別。
+    擴充關鍵字只比對標題，內文只比對企劃書的主要關鍵字，避免內文順帶提及就被歸類。"""
+    for w in CLASSIFY_IGNORE:
+        title, body = title.replace(w, ""), body.replace(w, "")
+    return [c["id"] for c in CATEGORIES
+            if any(k in title for k in c["p"] + c["a"]) or any(k in body for k in c["p"])]
 
 
 def is_relevant(a):
@@ -63,7 +67,7 @@ def prepare_docs(articles, cutoff):
         if a.get("origin"):
             d["origin"] = a["origin"]
         d["kind"] = infer_kind(a)
-        d["cats"] = classify(a["title"] + " " + (a.get("content") or "")[:300])
+        d["cats"] = classify(a["title"], (a.get("content") or "")[:300])
         d["_content"] = a.get("content") or ""
         docs.append(d)
     return docs
@@ -183,15 +187,28 @@ def quality_checks(docs):
 
 
 # ---------------- 規則分析（無 API 金鑰時） ----------------
-POS_RE = re.compile(r"成長|增加|增長|年增|攀升|創新高|新高|熱賣|熱銷|擴大|放寬|開放|鬆綁|推出|上市|開賣|調升|破兆|大增|倍增|翻倍|看好|衝")
-NEG_RE = re.compile(r"衰退|減少|下滑|下降|降溫|年減|萎縮|停售|緊縮|收緊|調降|虧損|減碼|疲弱|退燒|放緩|趨緩|跌")
+# 市場動能只看市場統計、公司動態與新聞；政策事件另外形成「監理政策」訊號
+POS_RE = re.compile(r"成長|增加|增長|年增|攀升|創新高|新高|熱賣|熱銷|擴大|推出|上市|開賣|調升|破兆|大增|倍增|翻倍|看好|買氣增|熱絡|大賺")
+NEG_RE = re.compile(r"衰退|減少|下滑|下降|降溫|年減|萎縮|停售|調降|虧損|減碼|疲弱|退燒|放緩|趨緩|跌|轉虧")
+TENTATIVE_RE = re.compile(r"[？?]|研議|尚待|評估中|是否|可能")
+LOOSEN_RE = re.compile(r"放寬|鬆綁|開放|簡化|彈性|擴大|新增")
+TIGHTEN_RE = re.compile(r"收緊|緊縮|加強|強化|限制|裁罰|罰|禁止|管制|要求|嚴|檢視|釐清|不符|示警|提醒|風險")
 PCT_RE = re.compile(r"(年增|成長|增加|增長|大增|年減|衰退|減少|下滑|減)\s*(?:約|近|逾|超過|達)?\s*(\d+(?:\.\d+)?)\s*(%|成|倍)")
+KIND_LABEL = {"stat": "市場統計", "policy": "政策法規", "company": "公司動態", "news": "新聞報導"}
 
 
 def direction(e):
     text = e["title"]
+    if TENTATIVE_RE.search(text):  # 尚在研議或疑問句，不判定方向
+        return None
     p, n = bool(POS_RE.search(text)), bool(NEG_RE.search(text))
     return "pos" if p and not n else "neg" if n and not p else None
+
+
+def policy_direction(e):
+    text = e["title"]
+    lo, ti = bool(LOOSEN_RE.search(text)), bool(TIGHTEN_RE.search(text))
+    return "loose" if lo and not ti else "tight" if ti and not lo else None
 
 
 def max_change(evs):
@@ -241,7 +258,7 @@ def rule_status_history(chain, main):
             st, why = prev, None
         elif i == 0:
             st, why = "new", f"首次觀察到此方向：「{e['title']}」"
-        elif e["kind"] not in seen_kinds and dirn == main:
+        elif e["kind"] not in seen_kinds:
             st, why = "dev", f"出現新的事件類型（{KIND_LABEL[e['kind']]}），方向延伸到新的面向"
         elif len(months) >= 3:
             st, why = "per", f"相同方向已跨越 {len(months)} 個月份，持續獲得新的獨立事件支持"
@@ -254,64 +271,144 @@ def rule_status_history(chain, main):
     return hist
 
 
-KIND_LABEL = {"stat": "市場統計", "policy": "政策法規", "company": "公司動態", "news": "新聞報導"}
+def theme_list():
+    """八大類別加上跨類別產業議題，逐一形成訊號。"""
+    themes = [{"id": c["id"], "name": c["name"], "short": CATEGORY_SHORT[c["id"]], "cats": [c["id"]],
+               "kw": c["p"] + c["a"], "is_cat": True} for c in CATEGORIES]
+    return themes + [dict(t, is_cat=False) for t in INDUSTRY_THEMES]
+
+
+def theme_match(t, e):
+    return t["id"] in e["cats"] if t["is_cat"] else any(k in e["title"] for k in t["kw"])
+
+
+def warned(e):
+    return any(d.get("warn") for d in e["docs"])
+
+
+def impact(sup):
+    if any(e["kind"] == "policy" and e["orig"]["src"] == "ib" for e in sup):
+        return 5, "包含主管機關正式發布的政策，影響整體保險業。"
+    if any(e["kind"] == "policy" for e in sup) and len(sup) >= 3:
+        return 4, "多項監理政策事件，影響多家業者的商品設計或經營。"
+    if any(e["kind"] == "stat" for e in sup):
+        return 4, "包含產業層級的市場統計。"
+    if len(source_names(sup)) >= 3 or len(sup) >= 4:
+        return 3, "多個來源或多項事件涉及，屬特定商品市場或客群層級。"
+    return 2, "報導來源有限，影響範圍可能僅限個別公司或商品。"
+
+
+TYPE_SUFFIX = {"momentum": "動能", "policy": "監理", "company": "布局", "attention": "關注"}
+
+
+def make_signal(t, kind, phrase, intro, sup, cnt, ctx, hold, c, c_why, notes):
+    sup = sorted(sup, key=lambda e: (e["date"], e["id"]))
+    cnt = sorted(cnt, key=lambda e: (e["date"], e["id"]))
+    chain = sorted([(e, "x") for e in sup] + [(e, "y") for e in cnt], key=lambda p: (p[0]["date"], p[0]["id"]))
+    mc = max_change(sup + cnt)
+    i_v, i_why = impact(sup)
+    latest = sup[-1]
+    summary = intro + f"最新為 {latest['date']}「{latest['title']}」。"
+    if cnt:
+        summary += f"另有 {len(cnt)} 項方向相反的事件，最新為「{cnt[-1]['title']}」。"
+    summary += "此訊號由規則分析產生，尚未經 AI 語意判讀，請搭配原始資料確認。"
+    return {
+        "id": f"R-{t['id']}-{kind}", "short": t["short"] + TYPE_SUFFIX[kind], "cats": t["cats"],
+        "name": f"{t['name']}：{phrase}", "summary": summary,
+        "es": {"v": score_es(len(sup)),
+               "why": f"{len(sup)} 項去重後的獨立事件支持此訊號，來源包含{'、'.join(source_names(sup))}。"},
+        "c": {"v": c, "why": c_why},
+        "m": {"v": score_m(mc[0]) if mc else None,
+              "why": f"事件中最大的變化為「{mc[1]}」（{mc[2]['date']}）。" if mc else
+              "現有事件未提供可比較的量化數據，無法判斷變化幅度。"},
+        "i": {"v": i_v, "why": i_why},
+        "evidence": ([{"ev": e["id"], "dir": "support", "note": notes["support"]} for e in sup] +
+                     [{"ev": e["id"], "dir": "counter", "note": notes["counter"]} for e in cnt] +
+                     [{"ev": e["id"], "dir": "context", "note": "同主題事件，方向不明確，不計入證據。"} for e in ctx] +
+                     [{"ev": e["id"], "dir": "hold", "note": "原始資料有品質警示，確認前不計入證據。"} for e in hold]),
+        "related": [],
+        "history": rule_status_history(chain, "x"),
+    }
 
 
 def rule_signals(events, base):
-    recent = [e for e in events.values() if 0 <= days_between(e["date"], base) <= SIGNAL_WINDOW_DAYS]
-    signals, used = [], set()
-    for cat in CATEGORIES:
-        evs = sorted((e for e in recent if cat["id"] in e["cats"]), key=lambda e: (e["date"], e["id"]))
-        dirs = [(e, direction(e)) for e in evs]
-        pos = sum(1 for _, d in dirs if d == "pos")
-        neg = sum(1 for _, d in dirs if d == "neg")
-        if pos + neg < 2:
+    W = SIGNAL_WINDOW_DAYS
+    recent = [e for e in events.values() if 0 <= days_between(e["date"], base) <= W]
+    fresh = lambda evs: any(days_between(e["date"], base) <= 120 for e in evs)  # 以近期為主
+    signals = []
+    for t in theme_list():
+        evs = sorted((e for e in recent if theme_match(t, e)), key=lambda e: (e["date"], e["id"]))
+        if not evs:
             continue
-        main = "pos" if pos >= neg else "neg"
-        warned = lambda e: any(d.get("warn") for d in e["docs"])
-        chain = [(e, d) for e, d in dirs if d and not warned(e)]
-        sup = [e for e, d in chain if d == main]
-        cnt = [e for e, d in chain if d != main]
-        if not sup or days_between(chain[-1][0]["date"], base) > 120:
-            continue
-        ctx = [e for e, d in dirs if d is None][-4:]
-        hold = [e for e, d in dirs if d and warned(e)]
-        mc = max_change(sup + cnt)
-        kw = Counter(k for e in sup for k in cat["p"] if k in e["title"]).most_common(1)
-        topic = kw[0][0] if kw else cat["name"]
-        srcs = source_names(sup)
-        es, c = score_es(len(sup)), score_c(len(sup), len(cnt))
-        i_v = 5 if any(e["kind"] == "policy" and e["orig"]["src"] == "ib" for e in sup) else \
-            4 if any(e["kind"] == "stat" for e in sup) else 3 if len(srcs) >= 3 else 2
-        word = "動能增強" if main == "pos" else "轉趨保守"
-        latest = sup[-1]
-        summary = (f"近 {SIGNAL_WINDOW_DAYS} 天內有 {len(sup)} 項與「{cat['name']}」相關、方向一致的獨立事件，"
-                   f"最新為 {latest['date']}「{latest['title']}」。")
-        if cnt:
-            summary += f"另有 {len(cnt)} 項反向事件，最新為「{cnt[-1]['title']}」。"
-        summary += "此訊號由規則分析產生（依關鍵字判斷方向），尚未經 AI 語意判讀，請搭配原始資料確認。"
-        evidence = ([{"ev": e["id"], "dir": "support", "note": "標題用詞與訊號方向一致。"} for e in sup] +
-                    [{"ev": e["id"], "dir": "counter", "note": "標題用詞與訊號方向相反。"} for e in cnt] +
-                    [{"ev": e["id"], "dir": "context", "note": "同類別事件，方向不明確，不計入證據。"} for e in ctx] +
-                    [{"ev": e["id"], "dir": "hold", "note": "原始資料有品質警示，確認前不計入證據。"} for e in hold])
-        used.update(x["ev"] for x in evidence)
-        signals.append({
-            "id": f"R-{cat['id']}-{main}", "short": cat["name"][:6], "cats": [cat["id"]],
-            "name": f"{topic}市場{word}", "summary": summary,
-            "es": {"v": es, "why": f"{len(sup)} 項去重後的獨立事件支持此方向，來源包含{'、'.join(srcs)}。"},
-            "c": {"v": c, "why": "只有一項獨立事件，無法比較方向是否一致。" if c is None else
-                  f"支持 {len(sup)} 項、反向 {len(cnt)} 項。"},
-            "m": {"v": score_m(mc[0]) if mc else None,
-                  "why": f"事件中最大的變化為「{mc[1]}」（{mc[2]['date']}）。" if mc else
-                  "現有事件未提供可比較的量化數據，無法判斷變化幅度。"},
-            "i": {"v": i_v, "why": {5: "包含主管機關正式發布的政策，影響整體保險業。",
-                                    4: "包含產業層級的市場統計。",
-                                    3: "多個來源報導，涉及特定商品市場。",
-                                    2: "報導來源有限，影響範圍可能僅限個別公司或商品。"}[i_v]},
-            "evidence": evidence, "related": [],
-            "history": rule_status_history(chain, main),
-        })
-    watch = [{"ev": e["id"], "why": "方向不明確或同類別事件不足，暫不形成訊號。"}
+        clean = [e for e in evs if not warned(e)]
+        hold = [e for e in evs if warned(e)][-3:]
+        made, used = [], set()
+
+        # 1. 市場動能：統計、公司動態、新聞的成長或降溫方向
+        mk = [(e, direction(e)) for e in clean if e["kind"] != "policy"]
+        pos = [e for e, d in mk if d == "pos"]
+        neg = [e for e, d in mk if d == "neg"]
+        if len(pos) + len(neg) >= 2 and fresh(pos + neg):
+            up = len(pos) >= len(neg)
+            sup, cnt = (pos, neg) if up else (neg, pos)
+            c = score_c(len(sup), len(cnt))
+            made.append(make_signal(
+                t, "momentum", "市場動能增強" if up else "市場轉趨保守",
+                f"近 {W} 天內有 {len(sup)} 項與「{t['name']}」相關、指向{'成長' if up else '降溫'}的獨立事件。",
+                sup, cnt, [e for e, d in mk if d is None][-4:], hold, c,
+                "只有一項獨立事件，無法比較方向是否一致。" if c is None else f"支持 {len(sup)} 項、反向 {len(cnt)} 項。",
+                {"support": "標題用詞與訊號方向一致。", "counter": "標題用詞與訊號方向相反。"}))
+            used |= {e["id"] for e in sup + cnt}
+
+        # 2. 監理政策：政策法規事件的放寬或趨嚴方向
+        pol = [e for e in clean if e["kind"] == "policy"]
+        official = [e for e in pol if e["orig"]["src"] in ("ib", "lia")]
+        if (len(pol) >= 2 or official) and fresh(pol):
+            pd = [(e, policy_direction(e)) for e in pol]
+            lo = [e for e, d in pd if d == "loose"]
+            ti = [e for e, d in pd if d == "tight"]
+            if lo or ti:
+                loose = len(lo) >= len(ti)
+                major, minor = (lo, ti) if loose else (ti, lo)
+                phrase = "監理政策朝放寬調整" if loose else "監理政策趨嚴"
+            else:
+                major, minor, phrase = [], [], "監理政策持續調整"
+            sup = [e for e in pol if e not in minor]
+            c = score_c(len(major), len(minor)) if len(major) + len(minor) >= 2 else None
+            made.append(make_signal(
+                t, "policy", phrase, f"近 {W} 天內有 {len(pol)} 項與「{t['name']}」相關的政策法規事件。",
+                sup, minor, [], hold, c,
+                "放寬或趨嚴方向可判斷的政策事件不足兩項，無法比較一致性。" if c is None else
+                f"朝{'放寬' if loose else '趨嚴'}方向 {len(major)} 項、相反方向 {len(minor)} 項。",
+                {"support": "政策法規事件，屬此監理方向或方向中性的調整。", "counter": "政策方向與多數事件相反。"}))
+            used |= {e["id"] for e in pol}
+
+        # 3. 業者布局：公司推出商品、合作、通路等動態
+        comp = [e for e in clean if e["kind"] == "company" and e["id"] not in used]
+        if len(comp) >= 2 and fresh(comp):
+            out = [e for e in comp if direction(e) == "neg"]
+            sup = [e for e in comp if e not in out]
+            if sup:
+                c = score_c(len(sup), len(out))
+                made.append(make_signal(
+                    t, "company", "業者商品與通路布局增加",
+                    f"近 {W} 天內有 {len(sup)} 項與「{t['name']}」相關的業者商品、合作或通路動態。",
+                    sup, out, [], hold, c, f"擴大布局 {len(sup)} 項、縮減或退出 {len(out)} 項。",
+                    {"support": "業者推出商品、合作或擴大通路。", "counter": "業者縮減或退出相關業務。"}))
+
+        # 4. 議題關注：前面都沒有形成訊號，但近 90 天事件明顯增加
+        if not made:
+            rec = [e for e in clean if days_between(e["date"], base) <= 90]
+            if len(rec) >= 3:
+                made.append(make_signal(
+                    t, "attention", "議題關注度上升",
+                    f"近 90 天內有 {len(rec)} 項與「{t['name']}」相關的獨立事件，但方向尚不明確。",
+                    rec, [], [], hold, None, "事件方向不一或無法判斷，暫不評估一致性。",
+                    {"support": "與此議題相關的近期事件。", "counter": ""}))
+        signals.extend(made)
+
+    used = {x["ev"] for s in signals for x in s["evidence"]}
+    watch = [{"ev": e["id"], "why": "目前與其他事件的關聯不足，暫不形成訊號。"}
              for e in sorted(recent, key=lambda e: e["date"], reverse=True)
              if e["id"] not in used and days_between(e["date"], base) <= 45][:15]
     return {"signals": signals, "watch": watch}
@@ -320,14 +417,15 @@ def rule_signals(events, base):
 # ---------------- Claude 語意分析 ----------------
 SYSTEM_PROMPT = """你是保險商品企劃的市場情報分析師，負責把已初步去重的市場事件整理成「市場訊號」（Market Signal）。輸入是一份 JSON：資料基準日、八大保險類別、前次分析的訊號，以及近期事件清單（每個事件已合併標題相近的重複報導，附日期、來源、類型、類別、標題與內文摘錄）。
 
-只依據輸入事件判斷，不補充輸入中沒有的市場事實或數字。引用事件時只使用輸入中的事件 id。
+輸入也包含跨類別的產業議題清單（themes）。只依據輸入事件判斷，不補充輸入中沒有的市場事實或數字。引用事件時只使用輸入中的事件 id。
 
 ## 工作
 1. merges 補充去重：不同事件若其實描述同一份統計、同一項政策公告或同一次公司行動（例如主管機關新聞稿與媒體轉述），列出要合併的事件，keep 選官方或最早的事件。不同月份的新統計、不同公司的行動、後續的新政策屬於不同事件，不可合併。
 2. signals 事件關聯與訊號形成：找出不同時間、不同來源或不同市場參與者的事件共同反映的相同、延續或反向的市場變化。類別相同不代表屬於同一訊號。評論、商品介紹或與方向無關的事件不列為支持證據。關聯不足時不要強行形成訊號。
    - 以近期為主：每個訊號最新的支持或反向事件應在資料基準日前 120 天內。
    - 原則上每個訊號至少有 2 項獨立事件；主管機關正式發布、影響廣泛的政策可以只有 1 項。
-   - 形成 4 到 12 個訊號。前次分析的訊號若仍有證據支持，沿用其 id 並更新內容；新訊號的 id 用 "S" 加數字，不可與前次重複。
+   - 形成 6 到 20 個訊號，在證據足夠的前提下盡量涵蓋不同的保險類別，以及跨類別的產業議題（輸入的 themes，例如獲利與資本、新制度接軌、銷售與消費者保護、數位與資安、高齡化、財富管理）。同一類別可以有不同面向的訊號，例如市場動能、監理政策、業者布局。產業議題訊號的 cats 可以為空陣列。
+   - 前次分析的訊號若仍有證據支持，沿用其 id 並更新內容；新訊號的 id 用 "S" 加數字，不可與前次重複。
 3. 每個訊號評估四項指標（0–5 的整數；無法判斷時 v 為 null，並在 why 說明缺少什麼；不得用 0 分代替資料不足）：
    - es 證據支持度：與訊號方向相關、去重後的獨立事件數與來源多樣性。1 項→2（主管機關正式發布→3）；2 項→3；3–4 項→4；5 項以上且跨時間或跨來源→5。
    - c 證據一致性：獨立證據是否指向同一方向。只有 1 項獨立事件時為 null。全部一致→5；大致一致、僅比較基礎不同→4；出現明顯分歧→3；多數互相矛盾→2；完全相反→1。保留反向證據，不可只挑支持的資料。
@@ -398,6 +496,7 @@ def ai_input(events, prev_payload, base):
     return {
         "base_date": base,
         "categories": [{"id": c["id"], "name": c["name"]} for c in CATEGORIES],
+        "themes": [t["name"] for t in INDUSTRY_THEMES],
         "previous_signals": prev,
         "events": [{
             "id": e["id"], "date": e["date"], "kind": KIND_LABEL[e["kind"]], "cats": e["cats"],
@@ -488,6 +587,7 @@ def build_payload(events, docs, result, meta):
     return {
         "meta": meta,
         "categories": CATEGORIES,
+        "themes": [{"id": t["id"], "name": t["name"], "kw": t["kw"], "cats": t["cats"]} for t in INDUSTRY_THEMES],
         "sources": SOURCES,
         "docs": out_docs,
         "events": {eid: {"sum": e["title"]} for eid, e in events.items()},

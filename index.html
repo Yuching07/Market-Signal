@@ -597,8 +597,9 @@ function statusAt(s,date){let st=null;for(const h of s.history){if(h.date<=date)
 function loadData(d){
   META=d.meta; BASE=d.meta.base; PREV=d.meta.prev||null;
   CATS=d.categories; CAT=Object.fromEntries(CATS.map(c=>[c.id,c]));
-  SRC=d.sources; DOCS=d.docs; EVENTS=d.events; SIGNALS=d.signals; WATCH=d.watch;
+  SRC=d.sources; DOCS=d.docs; EVENTS=d.events; SIGNALS=d.signals; WATCH=d.watch; THEMES=d.themes||[];
 }
+let THEMES=[];
 
 // 由原始資料推導事件日期與類型，並計算各訊號的時效性、綜合分數與完整度
 function prepare(){
@@ -648,7 +649,7 @@ async function boot(){
     if(r.ok){const d=await r.json(); if(d.meta&&d.signals) loadData(d)}
   }catch(e){/* 無法讀取時使用示範資料 */}
   prepare();
-  try{const saved=JSON.parse(localStorage.getItem('ms-prefs')||'{}');if(saved.cat&&(saved.cat==='all'||CAT[saved.cat]))state.cat=saved.cat;if(saved.sort)state.sort=saved.sort}catch(e){}
+  try{const saved=JSON.parse(localStorage.getItem('ms-prefs')||'{}');if(saved.cat&&(saved.cat==='all'||saved.cat==='general'||CAT[saved.cat]))state.cat=saved.cat;if(saved.sort)state.sort=saved.sort}catch(e){}
   document.getElementById('baseDate').textContent=fmt(BASE);
   document.getElementById('modeTag').textContent=MODE_LABEL[META.mode]||'';
   render();
@@ -665,7 +666,9 @@ function go(view,sel){state.view=view;state.sel=sel||null;render();window.scroll
 /* ===================== 共用元件 ===================== */
 const pill = st=>`<span class="pill ${STATUS[st].cls}"><span class="g" aria-hidden="true">${STATUS[st].g}</span>${STATUS[st].label}</span>`;
 const kindTag = k=>({formal:'<span class="tag formal">正式</span>',prov:'<span class="tag prov">暫定</span>',none:'<span class="tag none">無法評估</span>'})[k];
-const catNames = ids=>ids.map(id=>CAT[id].name).join(' · ');
+const catNames = ids=>ids.length?ids.map(id=>CAT[id].name).join(' · '):'整體市場議題';
+// 「整體市場議題」篩選：不屬於單一商品類別的產業議題訊號
+const inCatFilter = (cats,cat)=>cat==='all'||(cat==='general'?!cats.length:cats.includes(cat));
 const segs = v=>v==null?`<div class="segs na" aria-hidden="true">${'<i></i>'.repeat(5)}</div>`:`<div class="segs" aria-hidden="true">${[1,2,3,4,5].map(i=>`<i class="${i<=v?'on':''}"></i>`).join('')}</div>`;
 
 function metric(label,comp){
@@ -722,14 +725,20 @@ function matrix(list){
   const narrow=window.innerWidth<600;
   const W=narrow?360:560,H=narrow?300:340,L=narrow?40:46,R=narrow?10:18,T=14,B=46;
   const k=narrow?1.15:1;
-  const xd=[2.5,5.25], yd=[3,5];
+  const pts=SIGNALS.filter(s=>s.cred.score!=null&&s.sig.score!=null);
+  // 座標範圍依資料調整，最低不超過 1 分
+  const lo=(vals,def)=>Math.max(1,Math.min(def,Math.floor((Math.min(...vals)-0.25)*2)/2));
+  const xd=[lo(pts.map(s=>s.cred.score),2.5),5.25], yd=[lo(pts.map(s=>s.sig.score),3),5];
   const x=v=>L+(v-xd[0])/(xd[1]-xd[0])*(W-L-R);
   const y=v=>T+(1-(v-yd[0])/(yd[1]-yd[0]))*(H-T-B);
   const ids=new Set(list.map(s=>s.id));
   let g='';
-  for(const t of [3,3.5,4,4.5,5]){
+  const ticks=(d)=>{const t=[];for(let v=Math.ceil(d[0]*2)/2;v<=5;v+=0.5)t.push(v);return t};
+  for(const t of ticks(xd)){
     g+=`<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H-B}" stroke="var(--line)" stroke-width="1"/>`;
     g+=`<text x="${x(t)}" y="${H-B+16}" text-anchor="middle" font-size="${11*k}" fill="var(--muted)" class="num">${t.toFixed(1)}</text>`;
+  }
+  for(const t of ticks(yd)){
     g+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
     g+=`<text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="${11*k}" fill="var(--muted)">${t.toFixed(1)}</text>`;
   }
@@ -739,17 +748,29 @@ function matrix(list){
   g+=ql(W-R-6,T+16,'end','優先關注')+ql(L+6,T+16,'start','持續追蹤')+ql(W-R-6,H-B-8,'end','定期檢視')+ql(L+6,H-B-8,'start','補充調查');
   g+=`<text x="${(L+W-R)/2}" y="${H-8}" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">可信度 Credibility →</text>`;
   g+=`<text transform="translate(12 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">重大性 Significance →</text>`;
-  for(const s of SIGNALS){
-    if(s.cred.score==null||s.sig.score==null) continue;
-    const cx=x(Math.max(s.cred.score,xd[0])), cy=y(Math.max(s.sig.score,yd[0])), on=ids.has(s.id);
+  // 相同座標的點左右錯開，避免完全重疊
+  const groups={};
+  for(const s of pts)(groups[f2(s.cred.score)+'|'+f2(s.sig.score)]=groups[f2(s.cred.score)+'|'+f2(s.sig.score)]||[]).push(s);
+  const pos=new Map();
+  for(const grp of Object.values(groups)) grp.forEach((s,i)=>pos.set(s,{cx:x(s.cred.score)+(i-(grp.length-1)/2)*10,cy:y(s.sig.score)}));
+  // 標籤依重大性由高到低放置；右側、左側、上方都會重疊時省略（滑過資料點仍可看到名稱）
+  const fs=12.5*k, placed=[];
+  const fits=r=>r.x>=L&&r.x+r.w<=W-R&&r.y>=T&&r.y+r.h<=H-B&&!placed.some(p=>r.x<p.x+p.w&&p.x<r.x+r.w&&r.y<p.y+p.h&&p.y<r.y+r.h);
+  const labels=new Map();
+  for(const s of [...pts].filter(s=>ids.has(s.id)).sort((a,b)=>b.sig.score-a.sig.score)){
+    const {cx,cy}=pos.get(s), w=s.short.length*fs+4, h=fs+2;
+    const opts=[{x:cx+11,y:cy-h/2,a:'start',tx:cx+12},{x:cx-11-w,y:cy-h/2,a:'end',tx:cx-12},{x:cx-w/2,y:cy-10-h,a:'middle',tx:cx,ty:cy-12}];
+    const o=opts.find(o=>fits({x:o.x,y:o.y,w,h}));
+    if(o){placed.push({x:o.x,y:o.y,w,h});labels.set(s,o)}
+  }
+  for(const s of pts){
+    const {cx,cy}=pos.get(s), on=ids.has(s.id), lab=labels.get(s);
     const prov=s.cred.kind!=='formal'||s.sig.kind!=='formal';
     const col=STATUS[s.status].color;
-    // 標籤放右側；若右側太近有其他資料點（或已在右緣）則改放左側
-    const left=s.cred.score>=4.75||SIGNALS.some(o=>o!==s&&o.cred.score>s.cred.score&&o.cred.score-s.cred.score<(narrow?0.75:0.45)&&Math.abs(o.sig.score-s.sig.score)<0.2);
     g+=`<g class="pt" data-id="${s.id}" tabindex="0" role="button" aria-label="${esc(s.short)}：可信度 ${f2(s.cred.score)}，重大性 ${f2(s.sig.score)}，${STATUS[s.status].label}" style="cursor:pointer;opacity:${on?1:.22}">
       <circle cx="${cx}" cy="${cy}" r="16" fill="transparent"/>
       <circle cx="${cx}" cy="${cy}" r="7" fill="${prov?'var(--surface)':col}" stroke="${prov?col:'var(--surface)'}" stroke-width="${prov?2.5:2}"/>
-      <text x="${left?cx-12:cx+12}" y="${cy+4}" text-anchor="${left?'end':'start'}" font-size="${12.5*k}" font-weight="500" fill="var(--ink)">${esc(s.short)}</text>
+      ${lab?`<text x="${lab.tx}" y="${lab.ty??cy+4}" text-anchor="${lab.a}" font-size="${fs}" font-weight="500" fill="var(--ink)">${esc(s.short)}</text>`:''}
     </g>`;
   }
   return `<div class="chart-wrap" id="mx"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="市場訊號優先順序矩陣">${g}</svg><div class="tip" hidden></div></div>
@@ -778,12 +799,12 @@ function bindMatrix(){
 }
 
 function renderDash(){
-  const inCat=s=>state.cat==='all'||s.cats.includes(state.cat);
-  let list=SIGNALS.filter(inCat);
+  let list=SIGNALS.filter(s=>inCatFilter(s.cats,state.cat));
   const key={sig:s=>s.sig.score??-1, cred:s=>s.cred.score??-1, date:s=>utc(s.latest)}[state.sort];
   list=[...list].sort((a,b)=>key(b)-key(a));
-  const watch=WATCH.filter(w=>state.cat==='all'||w.cats.includes(state.cat)).slice(0,12);
-  const count=id=>SIGNALS.filter(s=>s.cats.includes(id)).length;
+  const watch=WATCH.filter(w=>inCatFilter(w.cats,state.cat)).slice(0,12);
+  const count=id=>SIGNALS.filter(s=>inCatFilter(s.cats,id)).length;
+  const catLabel=state.cat==='general'?'整體市場議題':CAT[state.cat]?.name;
   app.innerHTML=`
   <div class="view-head"><div><div class="eyebrow">MARKET SIGNAL DASHBOARD</div><h1>目前市場上值得注意的變化</h1></div>
   <p>系統將市場統計、公司動態、新聞報導與法規政策分類、去重並關聯，形成可判讀的市場訊號。選擇您負責的商品類別，再點選訊號查看判斷依據。</p></div>
@@ -793,6 +814,7 @@ function renderDash(){
     <div class="chips" role="group" aria-label="保險商品類別">
       <button class="chip" data-cat="all" aria-pressed="${state.cat==='all'}">全部類別<span class="n">${SIGNALS.length}</span></button>
       ${CATS.map(c=>`<button class="chip" data-cat="${c.id}" aria-pressed="${state.cat===c.id}">${c.name}<span class="n">${count(c.id)}</span></button>`).join('')}
+      ${count('general')?`<button class="chip" data-cat="general" aria-pressed="${state.cat==='general'}">整體市場議題<span class="n">${count('general')}</span></button>`:''}
     </div>
     <label class="sort" for="sortSel">排序
       <select id="sortSel">
@@ -803,7 +825,7 @@ function renderDash(){
     </label>
   </div>
   <div class="dash">
-    <div class="cards">${list.length?list.map(card).join(''):`<div class="empty"><b>「${CAT[state.cat].name}」目前沒有形成市場訊號</b><br>系統會保留相關資料，待新的市場資訊加入後重新分析。${watch.length?`目前有 ${watch.length} 筆觀察中資料。`:'目前此類別也沒有觀察中資料。'}</div>`}</div>
+    <div class="cards">${list.length?list.map(card).join(''):`<div class="empty"><b>「${catLabel}」目前沒有形成市場訊號</b><br>系統會保留相關資料，待新的市場資訊加入後重新分析。${watch.length?`目前有 ${watch.length} 筆觀察中資料。`:'目前此類別也沒有觀察中資料。'}</div>`}</div>
     <aside>
       <section class="panel"><h2>優先順序矩陣</h2><p class="sub">可信度與重大性分開評估，不合併為單一總分。點選資料點查看詳細。</p>${matrix(list)}</section>
       <section class="panel"><h2>觀察中資料</h2><p class="sub">事件關聯不足，暫不形成訊號；新資料加入後會重新分析。</p>
@@ -924,7 +946,7 @@ function renderData(){
 
 /* ===================== 評估方法 ===================== */
 function classify(text){
-  return CATS.map(c=>({c, p:c.p.filter(k=>text.includes(k)), s:c.s.filter(k=>text.includes(k))})).filter(r=>r.p.length||r.s.length)
+  return CATS.map(c=>({c, p:[...c.p,...(c.a||[])].filter(k=>text.includes(k)), s:c.s.filter(k=>text.includes(k))})).filter(r=>r.p.length||r.s.length)
     .sort((a,b)=>(b.p.length-a.p.length)||(b.s.length-a.s.length));
 }
 function clsOut(text){
@@ -989,7 +1011,10 @@ function renderMethod(){
     <section class="block"><h2>八大保險分類詞庫</h2>
       ${CATS.map(c=>`<details class="kw"><summary>${c.name}</summary>
         <div class="kwrow"><b>主要關鍵字</b>${c.p.map(k=>`<span class="kwi p">${k}</span>`).join('')}</div>
-        <div class="kwrow"><b>次要關鍵字</b>${c.s.map(k=>`<span class="kwi">${k}</span>`).join('')}</div></details>`).join('')}
+        <div class="kwrow"><b>次要關鍵字</b>${c.s.map(k=>`<span class="kwi">${k}</span>`).join('')}</div>
+        ${c.a?.length?`<div class="kwrow"><b>擴充關鍵字（新聞常用說法，只比對標題）</b>${c.a.map(k=>`<span class="kwi p">${k}</span>`).join('')}</div>`:''}</details>`).join('')}
+      ${THEMES.length?`<h2 style="margin-top:8px">跨類別產業議題</h2><p>商品企劃需要掌握、但不屬於單一商品類別的議題，在「整體市場議題」篩選中查看。</p>
+      ${THEMES.map(t=>`<details class="kw"><summary>${esc(t.name)}</summary><div class="kwrow"><b>標題關鍵字</b>${t.kw.map(k=>`<span class="kwi">${esc(k)}</span>`).join('')}</div></details>`).join('')}`:''}
     </section>
     <section class="block"><h2>資料來源與自動更新</h2>
       <p>系統每天自動抓取企劃書列出的公開來源：金管會保險局（新聞稿、重要公告）、中央社（依八大類別關鍵字站內搜尋）、壽險公會（最新消息、重要政策）、保險代理人公會（各大網站新聞彙整）。資料保留近 ${META.lookback_days||365} 天，形成訊號時以近 ${META.window_days||180} 天的事件為主；時間判斷一律以發布日期為準。</p>

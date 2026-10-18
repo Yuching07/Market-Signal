@@ -10,6 +10,7 @@ GitHub Actions（每天台灣時間 06:00）
        1. 抓取資料：金管會保險局、中央社、壽險公會、保險代理人公會新聞彙整
        2. 八大分類（關鍵字詞庫）→ 去重 → 原始資料品質檢核
        3. 形成市場訊號：有 Claude API 金鑰時由 Claude 判讀；沒有時改用規則分析
+          （規則分析對每個類別與產業議題分別判斷市場動能、監理政策、業者布局三個面向）
        4. 寫入 data/signals.json 並提交回 repo
 網站 index.html 讀取 data/signals.json 顯示
 ```
@@ -60,7 +61,8 @@ python pipeline/update.py --no-ai      # 不呼叫 Claude
 
 ## 調整
 
-- 新增或修改分類關鍵字：編輯 `pipeline/config.py` 的 `CATEGORIES`。
+- 新增或修改分類關鍵字：編輯 `pipeline/config.py` 的 `CATEGORIES`（企劃書詞庫）與 `CATEGORY_ALIASES`（新聞常用說法，只比對標題）。
+- 跨類別產業議題（獲利與資本、新制度接軌、銷售與消保、數位與資安、高齡化、財富管理）：編輯 `INDUSTRY_THEMES`。
 - 中央社搜尋的主題：編輯 `CNA_QUERIES`。
 - 資料保留天數與訊號時間範圍：`LOOKBACK_DAYS`、`SIGNAL_WINDOW_DAYS`。
 - 使用的 Claude 模型：`AI_MODEL`。每次分析約送出數百項事件，費用依當天事件量而定。
