@@ -59,6 +59,15 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .tab[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
 .basedate{margin-left:auto;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:baseline}
 .basedate b{color:var(--ink);font-weight:500}
+.mode-tag{font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500;align-self:center}
+.mode-tag:empty{display:none}
+.muted{color:var(--muted)}
+.mode-note{font-size:13.5px;color:var(--ink-2);background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--r);padding:10px 14px;margin-bottom:16px}
+.src-status{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.src-status li{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;font-size:14px;border-top:1px solid var(--line);padding-top:8px}
+.src-status li:first-child{border-top:0;padding-top:0}
+.src-status .ok{color:var(--st-per);font-weight:500}
+.src-status .fail{color:var(--warn);font-weight:500}
 
 main{padding-block:24px 64px}
 .view-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 24px;margin-bottom:20px}
@@ -349,17 +358,20 @@ details.kw summary{cursor:pointer;font-weight:500;padding:2px 0}
       <button class="tab" data-view="data">原始資料</button>
       <button class="tab" data-view="method">評估方法</button>
     </nav>
-    <div class="basedate">資料基準日 <b class="num" id="baseDate"></b></div>
+    <div class="basedate">資料基準日 <b class="num" id="baseDate"></b><span class="mode-tag" id="modeTag"></span></div>
   </div>
 </header>
 <main class="gutter"><div class="wrap" id="app"></div></main>
 
 <script>
-/* ===================== 資料：依提案「實際使用資料與參考文獻」與第三輪動態更新測試結果 ===================== */
-const BASE = '2026-10-17';   // 資料基準日
-const PREV = '2026-10-03';   // 上次更新
+/* ===================== 資料 =====================
+   優先讀取每日自動更新的 data/signals.json（由 pipeline/update.py 產生）；
+   讀取失敗時（例如直接開啟本機檔案）改用下方企劃書測試資料作為示範。 */
+let META = {mode:'demo'};
+let BASE = '2026-10-17';   // 資料基準日
+let PREV = '2026-10-03';   // 上次更新
 
-const CATS = [
+let CATS = [
   {id:'inv', name:'投資型保險',
    p:['投資型保單','投資型壽險','變額壽險','變額萬能壽險','投資型年金','變額年金'],
    s:['投資標的','連結基金','帳戶價值','保單帳戶價值','專設帳簿','單位淨值','全權委託帳戶','委託投資帳戶','保險成本','附加費用','投資風險']},
@@ -385,9 +397,9 @@ const CATS = [
    p:['團體保險','團險','團體一年定期壽險','小額終老保險'],
    s:['企業員工福利','團體醫療','團體傷害','喪葬費用','高齡','簡易投保']},
 ];
-const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
+let CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
 
-const SRC = {
+let SRC = {
   fsc:{name:'金管會保險局', url:'https://www.ib.gov.tw/'},
   cna:{name:'中央社', url:'https://www.cna.com.tw/'},
   udn:{name:'聯合新聞網', url:'https://udn.com/'},
@@ -398,7 +410,7 @@ const SRC = {
 const KIND = {stat:'市場統計', policy:'政策法規', company:'公司動態', news:'新聞報導'};
 
 // 原始資料（編號對應提案參考文獻）；ingest = 系統收錄日期
-const DOCS = [
+let DOCS = [
   {no:1, date:'2026-10-08', ingest:'2026-10-08', src:'fsc', kind:'policy', ev:'E_wm_policy', title:'金管會開放財富管理保險商品不適用「人壽保險商品死亡給付對保單價值準備金（保單帳戶價值）之最低比率規範」，助益保險業拓展財富管理業務'},
   {no:2, date:'2026-10-06', ingest:'2026-10-06', src:'fsc', kind:'policy', ev:'E_vc', title:'預告修正「保險業資金辦理專案運用公共及社會福利事業投資管理辦法」，鼓勵保險業資金投入創投事業'},
   {no:3, date:'2026-10-06', ingest:'2026-10-06', src:'fsc', kind:'policy', ev:'E_health', title:'金管會放寬保險業投資健康福祉事業 串聯健康促進、長照服務與全齡金融，打造健康福祉新生態'},
@@ -428,7 +440,7 @@ const DOCS = [
 ];
 
 // 去重後的獨立事件
-const EVENTS = {
+let EVENTS = {
   E_inv_q1:{sum:'壽險業首季新契約保費 3682 億元，投資型保單年增逾 5 成。'},
   E_fx_feb:{sum:'前 2 月外幣保單及美元投資型保單銷售成長。'},
   E_inv_apr:{sum:'前 4 月投資型壽險及投資型年金銷售延續成長。'},
@@ -453,15 +465,8 @@ const EVENTS = {
   E_presale:{sum:'壽險公會訂定保險商品銷售前程序作業準則。'},
   E_q6:{sum:'內文為外溢效果及實物給付型保險商品銷售統計，但標題與日期標示為另一份監理指引。'},
 };
-for (const [id,e] of Object.entries(EVENTS)){
-  e.id=id; e.docs=DOCS.filter(d=>d.ev===id);
-  const ds=e.docs.map(d=>d.date).filter(Boolean).sort();
-  e.date=ds[0]||null;
-  e.kind=e.docs.find(d=>!d.dupOf)?.kind||e.docs[0].kind;
-}
-
 // 市場訊號（評分與理由依提案測試結果整理；時效性由系統依日期計算）
-const SIGNALS = [
+let SIGNALS = [
  {id:'S1', short:'投資型保單', cats:['inv','ir'],
   name:'投資型保單銷售動能持續增強，並伴隨商品與通路投入',
   summary:'不同時間公布的市場統計持續顯示投資型保單新契約保費成長，年增幅度由首季逾 5 成擴大到前 8 月 135%。期間壽險公司陸續推出投資型及外幣保險商品，商品與通路投入跟上銷售動能。目前沒有出現反向證據，判斷市場方向持續存在。',
@@ -555,7 +560,7 @@ const SIGNALS = [
 ];
 
 // 尚未形成訊號的觀察中資料
-const WATCH = [
+let WATCH = [
   {ev:'E_costco', cats:['acc'], why:'單一通路合作案，尚未出現其他業者跟進或銷售數據。'},
   {ev:'E_pet', cats:['grp'], why:'寵物險屬產險商品，目前僅 1 項獨立事件（#9、#12 為重複收錄，已合併）。'},
   {ev:'E_vc', cats:[], why:'預告修正階段，與「健康福祉事業投資限制放寬」同屬資金運用鬆綁，待正式發布。'},
@@ -589,9 +594,30 @@ function composite(vals){
 }
 function statusAt(s,date){let st=null;for(const h of s.history){if(h.date<=date)st=h.st}return st}
 
-for(const s of SIGNALS){
+function loadData(d){
+  META=d.meta; BASE=d.meta.base; PREV=d.meta.prev||null;
+  CATS=d.categories; CAT=Object.fromEntries(CATS.map(c=>[c.id,c]));
+  SRC=d.sources; DOCS=d.docs; EVENTS=d.events; SIGNALS=d.signals; WATCH=d.watch;
+}
+
+// 由原始資料推導事件日期與類型，並計算各訊號的時效性、綜合分數與完整度
+function prepare(){
+  const byEv={};
+  for(const d of DOCS) (byEv[d.ev]=byEv[d.ev]||[]).push(d);
+  for (const [id,e] of Object.entries(EVENTS)){
+    e.id=id; e.docs=byEv[id]||[];
+    const ds=e.docs.map(d=>d.date).filter(Boolean).sort();
+    e.date=ds[0]||null;
+    e.kind=e.docs.find(d=>!d.dupOf)?.kind||e.docs[0]?.kind||'news';
+  }
+  WATCH=WATCH.filter(w=>EVENTS[w.ev]?.docs.length);
+  SIGNALS=SIGNALS.filter(s=>s.evidence.some(e=>EVENTS[e.ev]?.docs.length));
+  for(const s of SIGNALS){
+  s.evidence=s.evidence.filter(e=>EVENTS[e.ev]);
+  for(const h of s.history) h.date=h.date||EVENTS[h.ev]?.date;
+  s.history=s.history.filter(h=>h.date);
   const valid=s.evidence.filter(e=>e.dir==='support'||e.dir==='counter');
-  const latest=valid.map(e=>EVENTS[e.ev].date).sort().at(-1);
+  const latest=valid.map(e=>EVENTS[e.ev].date).filter(Boolean).sort().at(-1)||BASE;
   const rd=days(latest,BASE);
   s.r={v:recencyScore(rd), why:`最新有效事件發布於 ${fmt(latest)}，距資料基準日 ${rd} 天。依事件發布日期計算，不以收錄日期計算。`};
   s.cred=composite([s.es.v,s.c.v]);
@@ -599,22 +625,40 @@ for(const s of SIGNALS){
   const all=[s.es.v,s.c.v,s.r.v,s.m.v,s.i.v];
   s.nValid=all.filter(x=>x!=null).length;
   s.complete=s.nValid/5*100;
-  s.status=s.history.at(-1).st;
+  s.status=s.history.at(-1)?.st||'new';
   s.latest=latest;
   s.nIndep=valid.length;
   s.warnings=s.evidence.filter(e=>EVENTS[e.ev].docs.some(d=>d.warn)).length;
   const c=s.cred.score??0, g=s.sig.score??0;
   s.action = c>=3.75&&g>=3.75?'優先關注': g>=3.75?'持續追蹤': c>=3.75?'定期檢視':'補充調查';
+  }
 }
 
 /* ===================== 狀態 ===================== */
 const state={view:'dash', cat:'all', sort:'sig', sel:null, q:''};
-try{const saved=JSON.parse(localStorage.getItem('ms-prefs')||'{}');if(saved.cat&&(saved.cat==='all'||CAT[saved.cat]))state.cat=saved.cat;if(saved.sort)state.sort=saved.sort}catch(e){}
 function savePrefs(){try{localStorage.setItem('ms-prefs',JSON.stringify({cat:state.cat,sort:state.sort}))}catch(e){}}
 if(['data','method'].includes(location.hash.slice(1))) state.view=location.hash.slice(1);
 
 const app=document.getElementById('app');
-document.getElementById('baseDate').textContent=fmt(BASE);
+const MODE_LABEL={ai:'AI 語意分析', rules:'規則分析', demo:'示範資料'};
+
+async function boot(){
+  try{
+    const r=await fetch('data/signals.json',{cache:'no-store'});
+    if(r.ok){const d=await r.json(); if(d.meta&&d.signals) loadData(d)}
+  }catch(e){/* 無法讀取時使用示範資料 */}
+  prepare();
+  try{const saved=JSON.parse(localStorage.getItem('ms-prefs')||'{}');if(saved.cat&&(saved.cat==='all'||CAT[saved.cat]))state.cat=saved.cat;if(saved.sort)state.sort=saved.sort}catch(e){}
+  document.getElementById('baseDate').textContent=fmt(BASE);
+  document.getElementById('modeTag').textContent=MODE_LABEL[META.mode]||'';
+  render();
+}
+
+function modeNote(){
+  if(META.mode==='demo') return `<p class="mode-note">目前顯示企劃書的測試資料。部署後系統每天自動抓取金管會保險局、中央社、壽險公會與保險代理人公會的新資料並重新分析。</p>`;
+  if(META.mode==='rules') return `<p class="mode-note">目前以關鍵字規則形成訊號${META.ai_error?'（AI 分析本次執行失敗）':'（尚未設定 Claude API 金鑰）'}，方向判斷較粗略，請搭配原始資料確認。資料更新於 ${esc(META.generated.replace('T',' ').slice(0,16))}。</p>`;
+  return `<p class="mode-note">訊號由 Claude 依企劃書評估標準判讀，資料更新於 ${esc(META.generated.replace('T',' ').slice(0,16))}。</p>`;
+}
 
 function go(view,sel){state.view=view;state.sel=sel||null;render();window.scrollTo(0,0)}
 
@@ -649,6 +693,10 @@ function card(s){
 
 /* ===================== 儀表板 ===================== */
 function changes(){
+  if(!PREV) return `<section class="changes" aria-labelledby="chg">
+    <div class="changes-head"><h2 id="chg">近期市場變化摘要</h2><span>首次建立資料（${fmt(BASE)}）</span></div>
+    <ul class="change-list"><li><span class="change-ico c-new" aria-hidden="true">＋</span><span>收錄 ${DOCS.length} 筆相關資料，去重後 ${Object.keys(EVENTS).length} 項事件，形成 ${SIGNALS.length} 個市場訊號。下次更新起會列出與前次的差異。</span></li></ul>
+  </section>`;
   const items=[];
   for(const s of SIGNALS){
     const p=statusAt(s,PREV);
@@ -656,11 +704,14 @@ function changes(){
     else if(p!==s.status) items.push({cls:'c-status',ico:'↗',html:`<button class="linkish" data-open="${s.id}">${esc(s.short)}</button>：${STATUS[p].label} → ${STATUS[s.status].label}`});
   }
   const back=DOCS.filter(d=>d.date&&d.ingest>PREV&&d.date<PREV&&days(d.date,d.ingest)>14);
-  if(back.length) items.push({cls:'',ico:'↺',html:`補收錄 ${back.length} 筆歷史資料（${back.map(d=>'#'+d.no).join('、')}），已依發布日期排回時間軸，未視為最新事件`});
+  if(back.length) items.push({cls:'',ico:'↺',html:`補收錄 ${back.length} 筆歷史資料（${back.slice(0,8).map(d=>'#'+d.no).join('、')}${back.length>8?' 等':''}），已依發布日期排回時間軸，未視為最新事件`});
   const dups=DOCS.filter(d=>d.dupOf&&d.ingest>PREV);
-  if(dups.length) items.push({cls:'',ico:'⧉',html:`合併 ${dups.length} 筆重複報導（${dups.map(d=>`#${d.no}→#${d.dupOf}`).join('、')}），不重複計入證據`});
+  if(dups.length) items.push({cls:'',ico:'⧉',html:`合併 ${dups.length} 筆重複報導（${dups.slice(0,6).map(d=>`#${d.no}→#${d.dupOf}`).join('、')}${dups.length>6?' 等':''}），不重複計入證據`});
   const w=DOCS.filter(d=>d.warn&&d.ingest>PREV);
-  if(w.length) items.push({cls:'c-warn',ico:'!',html:`新增 ${w.length} 筆原始資料品質警示（${w.map(d=>'#'+d.no).join('、')}），確認前不計入證據`});
+  if(w.length) items.push({cls:'c-warn',ico:'!',html:`新增 ${w.length} 筆原始資料品質警示（${w.slice(0,8).map(d=>'#'+d.no).join('、')}${w.length>8?' 等':''}），確認前不計入證據`});
+  const fresh=DOCS.filter(d=>d.ingest>PREV&&!d.dupOf).length;
+  if(META.mode!=='demo') items.push({cls:'',ico:'↧',html:`本次新收錄 ${DOCS.filter(d=>d.ingest>PREV).length} 筆資料，其中 ${fresh} 筆為新的獨立事件`});
+  if(!items.length) items.push({cls:'',ico:'＝',html:'與上次更新相比，訊號狀態沒有變化'});
   return `<section class="changes" aria-labelledby="chg">
     <div class="changes-head"><h2 id="chg">近期市場變化摘要</h2><span>本次更新 ${fmt(BASE)}，與上次更新 ${fmt(PREV)} 比較</span></div>
     <ul class="change-list">${items.map(i=>`<li><span class="change-ico ${i.cls}" aria-hidden="true">${i.ico}</span><span>${i.html}</span></li>`).join('')}</ul>
@@ -689,7 +740,8 @@ function matrix(list){
   g+=`<text x="${(L+W-R)/2}" y="${H-8}" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">可信度 Credibility →</text>`;
   g+=`<text transform="translate(12 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="${12*k}" fill="var(--ink-2)">重大性 Significance →</text>`;
   for(const s of SIGNALS){
-    const cx=x(s.cred.score), cy=y(s.sig.score), on=ids.has(s.id);
+    if(s.cred.score==null||s.sig.score==null) continue;
+    const cx=x(Math.max(s.cred.score,xd[0])), cy=y(Math.max(s.sig.score,yd[0])), on=ids.has(s.id);
     const prov=s.cred.kind!=='formal'||s.sig.kind!=='formal';
     const col=STATUS[s.status].color;
     // 標籤放右側；若右側太近有其他資料點（或已在右緣）則改放左側
@@ -730,11 +782,12 @@ function renderDash(){
   let list=SIGNALS.filter(inCat);
   const key={sig:s=>s.sig.score??-1, cred:s=>s.cred.score??-1, date:s=>utc(s.latest)}[state.sort];
   list=[...list].sort((a,b)=>key(b)-key(a));
-  const watch=WATCH.filter(w=>state.cat==='all'||w.cats.includes(state.cat));
+  const watch=WATCH.filter(w=>state.cat==='all'||w.cats.includes(state.cat)).slice(0,12);
   const count=id=>SIGNALS.filter(s=>s.cats.includes(id)).length;
   app.innerHTML=`
   <div class="view-head"><div><div class="eyebrow">MARKET SIGNAL DASHBOARD</div><h1>目前市場上值得注意的變化</h1></div>
   <p>系統將市場統計、公司動態、新聞報導與法規政策分類、去重並關聯，形成可判讀的市場訊號。選擇您負責的商品類別，再點選訊號查看判斷依據。</p></div>
+  ${modeNote()}
   ${changes()}
   <div class="filters">
     <div class="chips" role="group" aria-label="保險商品類別">
@@ -773,13 +826,14 @@ function group(title,en,comp,inner){
   return `<section class="group"><div class="group-head"><div><h2>${title}</h2><div class="en">${en}</div></div>
     <div class="group-score">${comp.score==null?'<div class="ind-score na">無法評估</div>':`<div class="num">${f2(comp.score)}</div>`}<div>${kindTag(comp.kind)} <span class="note">${comp.n}/${comp.of} 項有效</span></div></div></div>${inner}</section>`;
 }
+const srcName = d=>SRC[d.src].name+(d.origin?`（原載：${esc(d.origin)}）`:'');
 function docLine(d){
   const s=SRC[d.src];
   const late=d.date&&days(d.date,d.ingest)>14;
-  return `<li><span><span class="no">#${d.no}</span> <span class="src">${s.name}</span>　${esc(d.title)}</span>
+  return `<li><span><span class="no">#${d.no}</span> <span class="src">${srcName(d)}</span>　${esc(d.title)}</span>
     ${d.dupOf?`<span class="flag dup">${d.dupKind||'同一事件之重複報導'}，已併入 #${d.dupOf}，不重複計入證據</span>`:''}
     ${late?`<span class="flag late">${fmt(d.ingest)} 才收錄，依發布日期 ${fmt(d.date)} 排入時間軸</span>`:''}
-    <a href="${s.url}" target="_blank" rel="noopener">前往${s.name}網站 ↗</a></li>`;
+    ${d.url?`<a href="${esc(d.url)}" target="_blank" rel="noopener">查看原文 ↗</a>`:`<a href="${s.url}" target="_blank" rel="noopener">前往${s.name}網站 ↗</a>`}</li>`;
 }
 function renderDetail(){
   const s=SIGNALS.find(x=>x.id===state.sel); if(!s){go('dash');return}
@@ -815,7 +869,7 @@ function renderDetail(){
             <p class="tl-sum">${esc(E.sum)}</p>
             <p class="tl-note">${esc(e.note)}</p>
             ${h?`<div class="statusmark">${pill(h.st)}<span>狀態判定：${esc(h.why)}</span></div>`:''}
-            ${wd.map(d=>`<div class="warnbox"><b>⚠ 原始資料品質警示（#${d.no}，原始標示日期 ${fmt(d.labeled)}）</b><ul>${d.warn.map(w=>`<li>${esc(w)}</li>`).join('')}</ul><span>系統保留原始內容，不自行選定正確日期或修改內容；確認前不視為有效證據。</span></div>`).join('')}
+            ${wd.map(d=>`<div class="warnbox"><b>⚠ 原始資料品質警示（#${d.no}${d.labeled?`，原始標示日期 ${fmt(d.labeled)}`:''}）</b><ul>${d.warn.map(w=>`<li>${esc(w)}</li>`).join('')}</ul><span>系統保留原始內容，不自行選定正確日期或修改內容；確認前不視為有效證據。</span></div>`).join('')}
             <ul class="docs">${E.docs.map(docLine).join('')}</ul>
           </div></li>`}).join('')}</ol>
       ${s.related?`<div class="section-title"><h2>相關但未計入證據</h2></div><ul class="watch panel">${s.related.map(r=>{const E=EVENTS[r.ev];return `<li><div class="w-meta"><span class="num">${fmt(E.date)}</span> · ${SRC[E.docs[0].src].name} · ${KIND[E.kind]}</div><div class="w-title">${esc(E.sum)}</div><div class="w-why">${esc(r.why)}</div></li>`}).join('')}</ul>`:''}
@@ -843,12 +897,15 @@ function linkedSignals(evId){
 }
 function renderData(){
   const q=state.q.trim().toLowerCase();
-  const rows=DOCS.filter(d=>!q||(d.title+SRC[d.src].name+KIND[d.kind]+d.no).toLowerCase().includes(q));
+  const LIMIT=300;
+  const matched=[...DOCS].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.no-a.no)
+    .filter(d=>!q||(d.title+SRC[d.src].name+(d.origin||'')+KIND[d.kind]+d.no).toLowerCase().includes(q));
+  const rows=matched.slice(0,LIMIT);
   app.innerHTML=`
   <div class="view-head"><div><div class="eyebrow">SOURCE RECORDS</div><h1>原始資料與處理結果</h1></div>
   <p>每筆資料保留名稱、發布單位、發布日期、收錄日期與來源，並列出去重與事件關聯結果。時間判斷一律以發布日期為準。</p></div>
   <div class="toolbar"><input class="search" id="q" type="search" placeholder="搜尋資料名稱、來源或編號" value="${esc(state.q)}" aria-label="搜尋原始資料">
-    <span class="note">共 ${DOCS.length} 筆資料，去重後 ${Object.keys(EVENTS).length} 項事件。提案參考資料未附原文網址，來源連結指向發布單位網站。</span></div>
+    <span class="note">共 ${DOCS.length} 筆資料，去重後 ${Object.keys(EVENTS).length} 項事件${matched.length>LIMIT?`；符合條件 ${matched.length} 筆，顯示最新 ${LIMIT} 筆，可用搜尋縮小範圍`:''}。${META.mode==='demo'?'提案參考資料未附原文網址，來源連結指向發布單位網站。':''}</span></div>
   <div class="table-scroll dt-wrap"><table class="dt">
     <thead><tr><th>#</th><th>發布日期</th><th>收錄日期</th><th>來源</th><th>類型</th><th>資料名稱</th><th>去重結果</th><th>關聯訊號</th><th>品質</th></tr></thead>
     <tbody>${rows.map(d=>{const E=EVENTS[d.ev];const late=d.date&&days(d.date,d.ingest)>14;
@@ -856,8 +913,8 @@ function renderData(){
       const td=(label,html,cls='')=>`<td class="${cls}" data-label="${label}"><div>${html}</div></td>`;
       return `<tr>${td('編號',d.no,'num')}${td('發布日期',d.date?fmt(d.date):`<span class="warncell">待確認</span><br><span class="muted">標示 ${fmt(d.labeled)}</span>`,'num')}
       ${td('收錄日期',fmt(d.ingest)+(late?'<br><span class="muted">補收錄</span>':''),'num')}
-      ${td('來源',`<a href="${SRC[d.src].url}" target="_blank" rel="noopener">${SRC[d.src].name}</a>`)}${td('類型',KIND[d.kind])}
-      ${td('資料名稱',esc(d.title),'t')}${td('去重結果',dd)}${td('關聯訊號',linkedSignals(d.ev))}
+      ${td('來源',`<a href="${SRC[d.src].url}" target="_blank" rel="noopener">${SRC[d.src].name}</a>${d.origin?`<br><span class="muted">原載：${esc(d.origin)}</span>`:''}`)}${td('類型',KIND[d.kind])}
+      ${td('資料名稱',d.url?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>`:esc(d.title),'t')}${td('去重結果',dd)}${td('關聯訊號',linkedSignals(d.ev))}
       ${td('品質',d.warn?`<span class="warncell">⚠ ${d.warn.length} 項異常</span>`:'<span class="muted">—</span>')}</tr>`}).join('')}
     ${rows.length?'':'<tr><td colspan="9" class="muted emptycell">沒有符合的資料，請換個關鍵字。</td></tr>'}</tbody>
   </table></div>`;
@@ -934,8 +991,10 @@ function renderMethod(){
         <div class="kwrow"><b>主要關鍵字</b>${c.p.map(k=>`<span class="kwi p">${k}</span>`).join('')}</div>
         <div class="kwrow"><b>次要關鍵字</b>${c.s.map(k=>`<span class="kwi">${k}</span>`).join('')}</div></details>`).join('')}
     </section>
-    <section class="block"><h2>資料來源</h2>
-      <p>中央社（新聞、政府政策調整）、金管會保險局（財務資料、市場與產業統計）、壽險公會（法規公告、公司重大資訊揭露）、保險代理人公會（各大網站新聞彙整）。測試資料另包含經濟日報、聯合新聞網與行政院消費者保護會。</p>
+    <section class="block"><h2>資料來源與自動更新</h2>
+      <p>系統每天自動抓取企劃書列出的公開來源：金管會保險局（新聞稿、重要公告）、中央社（依八大類別關鍵字站內搜尋）、壽險公會（最新消息、重要政策）、保險代理人公會（各大網站新聞彙整）。資料保留近 ${META.lookback_days||365} 天，形成訊號時以近 ${META.window_days||180} 天的事件為主；時間判斷一律以發布日期為準。</p>
+      ${META.sources_status?`<ul class="src-status">${Object.entries(SRC).map(([k,s])=>{const st=META.sources_status[k];
+        return `<li><b>${s.name}</b>${!st?'<span class="muted">尚未執行</span>':st.ok?`<span class="ok">✓ 正常</span><span class="note">${fmt(st.checked)} 取得 ${st.fetched} 筆，新增 ${st.new} 筆</span>`:`<span class="fail">✗ 本次無法取得</span><span class="note">${esc(st.error||'')}（既有資料保留）</span>`}</li>`}).join('')}</ul>`:'<p class="note">目前為示範資料，部署自動更新後會在這裡顯示各來源的抓取狀態。</p>'}
     </section>
   </div>`;
   const ta=document.getElementById('clsIn'), out=document.getElementById('clsOut');
@@ -954,5 +1013,5 @@ document.addEventListener('click',e=>{
 // 跨過手機／桌面寬度時重繪，讓矩陣圖改用對應尺寸
 let lastNarrow=window.innerWidth<600;
 window.addEventListener('resize',()=>{const n=window.innerWidth<600;if(n!==lastNarrow){lastNarrow=n;if(state.view==='dash')render()}});
-render();
+boot();
 </script>
