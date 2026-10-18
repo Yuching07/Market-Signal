@@ -38,7 +38,15 @@ jobs:
           git add data
           if git diff --cached --quiet; then
             echo "資料沒有變化"
-          else
-            git commit -m "更新市場資料 $(TZ=Asia/Taipei date +%F)"
-            git push
+            exit 0
           fi
+          git commit -m "更新市場資料 $(TZ=Asia/Taipei date +%F)"
+          # 執行期間若有人推送新的 commit，先接上最新版本再推送；
+          # 資料檔衝突時保留本次產生的版本（rebase 時 -X theirs 指正在重放的這個 commit）
+          for attempt in 1 2 3; do
+            git pull --rebase -X theirs origin main && git push && exit 0
+            echo "第 ${attempt} 次推送失敗，稍後重試"
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 10))
+          done
+          exit 1
