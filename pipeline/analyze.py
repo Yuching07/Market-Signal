@@ -6,7 +6,8 @@
 """
 import json
 import re
-from datetime import date
+from collections import Counter
+from datetime import date, timedelta
 
 from config import (AI_MODEL, CATEGORIES, CATEGORY_SHORT, CLASSIFY_IGNORE, EXCLUDE_TERMS, GENERAL_TERMS,
                     INDUSTRY_THEMES, SIGNAL_WINDOW_DAYS, SOURCES)
@@ -442,6 +443,7 @@ SYSTEM_PROMPT = """你是保險商品企劃的市場情報分析師，負責把�
 6. related：與訊號有關但不計入證據的事件（評論、預告階段的政策等），附原因。
 7. watch：基準日前 60 天內值得留意但關聯不足、暫不形成訊號的事件，最多 15 個，附原因。
 8. quality：看得出的原始資料問題，例如標題與內文不一致、發布日期與內容矛盾、統計期間不明、同一資料不同版本。不要自行修正或猜測正確內容。
+9. digest 今日市場摘要：只針對 new 為 true 的事件（上次更新以來新收錄）。headline 用一句話（30 字內）點出今天最值得商品企劃注意的市場變化；summary 用 2–4 句說明今天發生了什麼、涉及哪些類別或議題、與哪些既有訊號有關或是否帶來新方向；points 選 3–5 個最值得注意的事件，why 用一句話說明對商品企劃的意義。若沒有 new 事件，headline 說明今天沒有新的市場事件，points 留空。
 
 ## 文字
 全部使用繁體中文。short 為 2–8 字的簡稱；name 用一句話描述市場變化方向（40 字內）；summary 2–4 句，說明哪些事件形成此判斷與目前的發展；why 與 note 各一句，具體指出依據的事件或數字。"""
@@ -459,7 +461,7 @@ def _ref_schema(extra):
 
 
 AI_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["merges", "signals", "watch", "quality"],
+    "type": "object", "additionalProperties": False, "required": ["merges", "signals", "watch", "quality", "digest"],
     "properties": {
         "merges": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["keep", "merge", "why"],
@@ -481,13 +483,17 @@ AI_SCHEMA = {
             }}},
         "watch": _ref_schema({"why": {"type": "string"}}),
         "quality": _ref_schema({"issues": {"type": "array", "items": {"type": "string"}}}),
+        "digest": {"type": "object", "additionalProperties": False, "required": ["headline", "summary", "points"],
+                   "properties": {"headline": {"type": "string"}, "summary": {"type": "string"},
+                                  "points": _ref_schema({"why": {"type": "string"}})}},
     },
 }
 
 
-def ai_input(events, prev_payload, base):
+def ai_input(events, prev_payload, base, since):
     recent = sorted((e for e in events.values() if 0 <= days_between(e["date"], base) <= SIGNAL_WINDOW_DAYS),
                     key=lambda e: e["date"])
+    new_ids = {e["id"] for e in digest_scope(events, base, since)}
     prev = []
     for s in (prev_payload or {}).get("signals", []):
         prev.append({"id": s["id"], "short": s.get("short"), "name": s.get("name"), "cats": s.get("cats"),
@@ -499,7 +505,7 @@ def ai_input(events, prev_payload, base):
         "themes": [t["name"] for t in INDUSTRY_THEMES],
         "previous_signals": prev,
         "events": [{
-            "id": e["id"], "date": e["date"], "kind": KIND_LABEL[e["kind"]], "cats": e["cats"],
+            "id": e["id"], "date": e["date"], "new": e["id"] in new_ids, "kind": KIND_LABEL[e["kind"]], "cats": e["cats"],
             "title": e["title"], "sources": source_names([e]), "reports": len(e["docs"]),
             "excerpt": e["orig"]["_content"][:300],
             "warnings": [w for d in e["docs"] for w in d.get("warn", [])],
@@ -507,11 +513,11 @@ def ai_input(events, prev_payload, base):
     }
 
 
-def ai_analyze(events, prev_payload, base, log):
+def ai_analyze(events, prev_payload, base, since, log):
     import anthropic
 
     client = anthropic.Anthropic()
-    payload = json.dumps(ai_input(events, prev_payload, base), ensure_ascii=False)
+    payload = json.dumps(ai_input(events, prev_payload, base, since), ensure_ascii=False)
     log(f"  送出 {len(json.loads(payload)['events'])} 項事件給 {AI_MODEL} 分析")
     request = dict(
         model=AI_MODEL, max_tokens=64000, system=SYSTEM_PROMPT,
@@ -570,11 +576,111 @@ def apply_ai(result, events):
             "related": [r for r in s.get("related", []) if r.get("ev") in events],
         })
     watch = [w for w in result.get("watch", []) if w.get("ev") in events][:15]
-    return {"signals": signals, "watch": watch}
+    out = {"signals": signals, "watch": watch}
+    dg = result.get("digest")
+    if dg and dg.get("headline"):
+        out["digest"] = {"headline": dg["headline"], "summary": dg.get("summary", ""),
+                         "points": [p for p in dg.get("points", []) if p.get("ev") in events][:5]}
+    return out
+
+
+# ---------------- 今日市場摘要 ----------------
+def digest_scope(events, base, since):
+    """上次更新以來新收錄的事件（排除補收錄的舊資料）；不足 3 項時補上近 2 天的事件。"""
+    week_ago = (date.fromisoformat(base) - timedelta(days=7)).isoformat()
+    scope = [e for e in events.values()
+             if e["date"] >= week_ago and any(d["ingest"] > since for d in e["docs"])]
+    if len(scope) < 3:
+        two_days = (date.fromisoformat(base) - timedelta(days=2)).isoformat()
+        scope += [e for e in events.values() if e["date"] >= two_days and e not in scope]
+    priority = {"policy": 0, "stat": 1, "company": 2, "news": 3}
+    official = lambda e: 0 if e["orig"]["src"] in ("ib", "lia") else 1
+    return sorted(scope, key=lambda e: (official(e), priority[e["kind"]], e["date"]), reverse=False)
+
+
+def event_tags(e):
+    tags = [CATEGORY_SHORT[c] for c in e["cats"]]
+    tags += [t["short"] for t in INDUSTRY_THEMES if any(k in e["title"] for k in t["kw"])]
+    return tags
+
+
+def _quote(e, n=34):
+    t = e["title"].replace("　", " ").strip()
+    return "「" + (t if len(t) <= n else t[:n] + "…") + "」"
+
+
+def build_digest(events, result, prev_payload, base, since):
+    scope = digest_scope(events, base, since)
+    signal_of = {}
+    for s in result["signals"]:
+        for x in s["evidence"]:
+            if x["dir"] in ("support", "counter"):
+                signal_of.setdefault(x["ev"], s["id"])
+
+    names = {s["id"]: s["name"] for s in result["signals"]}
+
+    def point(e, why=""):
+        sid = signal_of.get(e["id"])
+        if not why:
+            why = f"列入「{names[sid]}」訊號的最新證據。" if sid else "目前尚未與其他事件形成訊號，持續觀察。"
+        return {"ev": e["id"], "why": why, "tags": event_tags(e), "signal": sid}
+
+    # 訊號狀態變化（與上次更新相比）
+    label = {"new": "新出現", "dev": "發展中", "per": "持續", "weak": "轉弱"}
+    prev_st = {s["id"]: (s.get("history") or [{}])[-1].get("st") for s in (prev_payload or {}).get("signals", [])}
+    changes = []
+    for s in result["signals"]:
+        cur = s["history"][-1]["st"] if s["history"] else "new"
+        if s["id"] not in prev_st:
+            changes.append(f"新增「{s['short']}」訊號")
+        elif prev_st[s["id"]] and prev_st[s["id"]] != cur:
+            changes.append(f"「{s['short']}」由{label[prev_st[s['id']]]}轉為{label[cur]}")
+
+    out = {"since": since, "count": len(scope)}
+    if result.get("digest"):  # Claude 撰寫的摘要
+        ai = result["digest"]
+        out.update(headline=ai["headline"], summary=ai["summary"], by="ai",
+                   points=[point(events[p["ev"]], p.get("why", "")) for p in ai["points"]])
+        return out
+
+    out["by"] = "rules"
+    if not scope:
+        out.update(headline="上次更新以來沒有新的市場事件",
+                   summary="各市場訊號維持上次的評估結果。" + ("訊號變化：" + "；".join(changes[:3]) + "。" if changes else ""),
+                   points=[])
+        return out
+    tag_count = Counter(t for e in scope for t in event_tags(e))
+    top = tag_count.most_common(3)
+    yesterday = (date.fromisoformat(base) - timedelta(days=1)).isoformat()
+    lead = "今日新增" if since >= yesterday else f"{since[5:].replace('-', '/')} 以來新增"
+    headline = f"{lead} {len(scope)} 項市場事件" + (f"，{top[0][0]}相關最多" if top else "")
+    parts = []
+    if top:
+        parts.append("新事件集中在" + "、".join(f"{k}（{v} 項）" for k, v in top) + "。")
+    stats = [e for e in scope if PCT_RE.search(e["title"]) or e["kind"] == "stat"]
+    pols = [e for e in scope if e["kind"] == "policy"]
+    comps = [e for e in scope if e["kind"] == "company"]
+    if stats:
+        parts.append("數據方面，" + "；".join(_quote(e) for e in stats[:2]) + "。")
+    if pols:
+        parts.append("監理方面，" + "；".join(_quote(e) for e in pols[:2]) + "。")
+    if comps and len(parts) < 4:
+        parts.append("業者動態方面，" + "；".join(_quote(e) for e in comps[:2]) + "。")
+    parts.append(("訊號變化：" + "；".join(changes[:3]) + "。") if changes else "各市場訊號的狀態與上次更新相同。")
+    picked = (pols[:2] + stats[:2] + comps[:2] + scope)
+    seen, points = set(), []
+    for e in picked:
+        if e["id"] not in seen:
+            seen.add(e["id"])
+            points.append(point(e))
+        if len(points) == 5:
+            break
+    out.update(headline=headline, summary="".join(parts), points=points)
+    return out
 
 
 # ---------------- 輸出 ----------------
-def build_payload(events, docs, result, meta):
+def build_payload(events, docs, result, meta, digest=None):
     referenced = {x["ev"] for s in result["signals"] for x in s["evidence"] + s.get("related", [])}
     referenced |= {w["ev"] for w in result["watch"]}
     out_docs = []
@@ -593,5 +699,6 @@ def build_payload(events, docs, result, meta):
         "events": {eid: {"sum": e["title"]} for eid, e in events.items()},
         "signals": result["signals"],
         "watch": [{"ev": w["ev"], "why": w["why"], "cats": events[w["ev"]]["cats"]} for w in result["watch"]],
+        "digest": digest,
         "referenced": len(referenced),
     }

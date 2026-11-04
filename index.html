@@ -80,6 +80,21 @@ main{padding-block:24px 64px}
 .changes-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-bottom:10px}
 .changes-head h2{font-size:15px}
 .changes-head span{font-size:13px;color:var(--muted)}
+.digest{display:grid;gap:8px;padding-bottom:14px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.digest-label{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.digest-label span:first-child{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--accent)}
+.digest-headline{font-family:var(--f-display);font-size:20px;font-weight:700;line-height:1.45;text-wrap:balance}
+.digest-text{color:var(--ink-2);max-width:78ch}
+.digest-points{list-style:none;margin:4px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.digest-points li{background:var(--surface-2);border-radius:8px;padding:10px 12px;display:grid;gap:4px;align-content:start;min-width:0}
+.dp-meta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:12px;color:var(--muted)}
+.dp-tag{font-size:11.5px;padding:0 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+.dp-title{font-weight:500;font-size:14.5px;line-height:1.5}
+.dp-title a{color:var(--ink);text-decoration-color:var(--line-2);text-underline-offset:3px}
+.dp-title a:hover{color:var(--accent)}
+.dp-why{font-size:13px;color:var(--ink-2)}
+.dp-sig{font-size:13px;justify-self:start}
+.changes-sub{font-size:13px;color:var(--muted);font-weight:500;margin-bottom:8px}
 .change-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 20px}
 .change-list li{display:flex;gap:10px;align-items:flex-start;font-size:14px;min-width:0}
 .change-ico{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px;margin-top:1px;background:var(--surface-2);color:var(--ink-2)}
@@ -292,6 +307,11 @@ details.kw summary{cursor:pointer;font-weight:500;padding:2px 0}
   .changes-head h2,.panel h2,.group-head h2{font-size:17px}
   .changes-head span,.panel .sub{font-size:14px}
   .change-list{grid-template-columns:1fr}
+  .digest-headline{font-size:19px}
+  .digest-text{font-size:15.5px}
+  .dp-title{font-size:15px}
+  .dp-why,.dp-sig{font-size:14px}
+  .dp-meta{font-size:13px}
   .change-list li{font-size:15px}
   .filters{gap:10px}
   .chips{flex-wrap:nowrap;overflow-x:auto;width:100%;padding-bottom:4px;scrollbar-width:none}
@@ -598,7 +618,18 @@ function loadData(d){
   META=d.meta; BASE=d.meta.base; PREV=d.meta.prev||null;
   CATS=d.categories; CAT=Object.fromEntries(CATS.map(c=>[c.id,c]));
   SRC=d.sources; DOCS=d.docs; EVENTS=d.events; SIGNALS=d.signals; WATCH=d.watch; THEMES=d.themes||[];
+  DIGEST=d.digest||null;
 }
+// 示範資料的今日摘要（依企劃書測試資料撰寫）
+let DIGEST={by:'demo',
+  headline:'主管機關接連鬆綁保險業資金運用與財富管理商品',
+  summary:'10/03 以來新增 8 項市場事件。金管會放寬保險業投資健康福祉事業，並開放財富管理保險商品不適用死亡給付最低比率規範；外溢保單則有多家壽險公司銷售成長，回饋機制朝點數、健康服務與數位平台發展。訊號變化：新增「健康福祉投資」訊號，「外溢保單」與「財富管理型」由新出現轉為發展中。',
+  points:[
+    {ev:'E_health',tags:['長照失能','醫療健康'],signal:'S5',why:'影響全體保險業資金運用，可能帶動長照與健康相關商品設計。'},
+    {ev:'E_wm_policy',tags:['投資型','利變外幣'],signal:'S4',why:'財富管理型保險由高雄專區試辦走向全國性制度。'},
+    {ev:'E_spill_reward',tags:['醫療健康'],signal:'S2',why:'外溢保單競爭由保費折減轉向多元健康回饋，影響商品設計方向。'},
+    {ev:'E_costco',tags:['傷害意外'],signal:null,why:'單一通路合作案，尚未形成訊號，持續觀察是否有其他業者跟進。'},
+  ]};
 let THEMES=[];
 
 // 由原始資料推導事件日期與類型，並計算各訊號的時效性、綜合分數與完整度
@@ -695,9 +726,28 @@ function card(s){
 }
 
 /* ===================== 儀表板 ===================== */
+// 今日市場摘要：一句重點、幾句敘述，以及最值得注意的事件（連到原文與相關訊號）
+function digestBlock(){
+  const dg=DIGEST; if(!dg) return '';
+  const pts=(dg.points||[]).filter(p=>EVENTS[p.ev]?.docs.length);
+  return `<div class="digest">
+    <div class="digest-label"><span>今日市場摘要</span><span class="note">${dg.by==='ai'?'由 Claude 依今日新資料撰寫':dg.by==='demo'?'示範內容':'依今日新資料自動整理'}</span></div>
+    <p class="digest-headline">${esc(dg.headline)}</p>
+    ${dg.summary?`<p class="digest-text">${esc(dg.summary)}</p>`:''}
+    ${pts.length?`<ul class="digest-points">${pts.map(p=>{const e=EVENTS[p.ev];const d=e.docs.find(x=>!x.dupOf)||e.docs[0];const s=p.signal&&SIGNALS.find(x=>x.id===p.signal);
+      return `<li>
+        <div class="dp-meta"><span class="num">${fmt(e.date)}</span><span>${srcName(d)}</span>${(p.tags&&p.tags.length?p.tags:['整體市場']).map(t=>`<span class="dp-tag">${esc(t)}</span>`).join('')}</div>
+        <div class="dp-title">${d.url?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(e.sum)}</a>`:esc(e.sum)}</div>
+        ${p.why?`<div class="dp-why">${esc(p.why)}</div>`:''}
+        ${s?`<button class="linkish dp-sig" data-open="${s.id}">查看訊號：${esc(s.short)} →</button>`:''}
+      </li>`}).join('')}</ul>`:''}
+  </div>`;
+}
+
 function changes(){
   if(!PREV) return `<section class="changes" aria-labelledby="chg">
     <div class="changes-head"><h2 id="chg">近期市場變化摘要</h2><span>首次建立資料（${fmt(BASE)}）</span></div>
+    ${digestBlock()}
     <ul class="change-list"><li><span class="change-ico c-new" aria-hidden="true">＋</span><span>收錄 ${DOCS.length} 筆相關資料，去重後 ${Object.keys(EVENTS).length} 項事件，形成 ${SIGNALS.length} 個市場訊號。下次更新起會列出與前次的差異。</span></li></ul>
   </section>`;
   const items=[];
@@ -717,6 +767,8 @@ function changes(){
   if(!items.length) items.push({cls:'',ico:'＝',html:'與上次更新相比，訊號狀態沒有變化'});
   return `<section class="changes" aria-labelledby="chg">
     <div class="changes-head"><h2 id="chg">近期市場變化摘要</h2><span>本次更新 ${fmt(BASE)}，與上次更新 ${fmt(PREV)} 比較</span></div>
+    ${digestBlock()}
+    <h3 class="changes-sub">與上次更新相比</h3>
     <ul class="change-list">${items.map(i=>`<li><span class="change-ico ${i.cls}" aria-hidden="true">${i.ico}</span><span>${i.html}</span></li>`).join('')}</ul>
   </section>`;
 }

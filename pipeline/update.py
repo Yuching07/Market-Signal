@@ -132,12 +132,17 @@ def main():
     A.quality_checks(docs)
     log(f"  相關資料 {len(docs)} 筆，去重後 {len(events)} 項事件")
 
+    # 「上次更新」的日期：同一天重跑時沿用前一次的比較基準
+    prev_base = prev_meta.get("base")
+    prev_date = prev_base if prev_base and prev_base != today else prev_meta.get("prev")
+    since = prev_date or (now.date() - timedelta(days=1)).isoformat()
+
     mode, ai_error = "rules", None
     result = None
     if not args.no_ai and os.environ.get("ANTHROPIC_API_KEY"):
         log("Claude 語意分析…")
         try:
-            result = A.apply_ai(A.ai_analyze(events, prev, today, log), events)
+            result = A.apply_ai(A.ai_analyze(events, prev, today, since, log), events)
             mode = "ai"
         except Exception as e:
             ai_error = f"{type(e).__name__}: {e}"[:300]
@@ -147,16 +152,17 @@ def main():
         result = A.rule_signals(events, today)
     log(f"  形成 {len(result['signals'])} 個市場訊號，觀察中 {len(result['watch'])} 項")
 
-    prev_base = prev_meta.get("base")
+    digest = A.build_digest(events, result, prev, today, since)
+    log(f"  今日摘要：{digest['headline']}")
     meta = {
         "generated": now.isoformat(timespec="minutes"),
         "base": today,
-        "prev": prev_base if prev_base and prev_base != today else prev_meta.get("prev"),
+        "prev": prev_date,
         "mode": mode, "model": AI_MODEL if mode == "ai" else None, "ai_error": ai_error,
         "lookback_days": LOOKBACK_DAYS, "window_days": SIGNAL_WINDOW_DAYS,
         "sources_status": status, "doc_count": len(docs), "event_count": len(events),
     }
-    save(OUT, A.build_payload(events, docs, result, meta))
+    save(OUT, A.build_payload(events, docs, result, meta, digest))
     log(f"完成：{OUT}")
 
 
